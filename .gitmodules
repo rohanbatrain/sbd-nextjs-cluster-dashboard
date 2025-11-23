@@ -25,3 +25,15 @@
 [submodule "submodules/sbd-nextjs-landing-page"]
 	path = submodules/sbd-nextjs-landing-page
 	url = git@github.com:rohanbatrain/sbd-nextjs-landing-page.git
+[submodule "submodules/sbd-nextjs-memex"]
+	path = submodules/sbd-nextjs-memex
+	url = git@github.com:rohanbatrain/sbd-nextjs-memex.git
+[submodule "submodules/sbd-nextjs-myaccount"]
+	path = submodules/sbd-nextjs-myaccount
+	url = git@github.com:rohanbatrain/sbd-nextjs-myaccount.git
+[submodule "submodules/sbd-nextjs-raunak-ai"]
+	path = submodules/sbd-nextjs-raunak-ai
+	url = git@github.com:rohanbatrain/sbd-nextjs-raunak-ai.git
+[submodule "submodules/sbd-mkdocs"]
+	path = submodules/sbd-mkdocs
+	url = https://github.com/rohanbatrain/sbd-mkdocs
