@@ -1,18 +1,151 @@
 """
-Authentication routes module for Second Brain Database.
+# Authentication Routes
 
-Password Reset Abuse Prevention Overview:
-- All /forgot-password requests are logged (email, IP, user-agent, timestamp) to Redis for real-time abuse detection.
-- Abuse detection logic (service.py) flags suspicious activity based on volume, unique IPs, and IP reputation (VPN/proxy/abuse).
-- If suspicious, the user is notified by email, and the (email, IP) pair is flagged in Redis for 15 minutes.
-- Scoped whitelisting/blocking of (email, IP) pairs is supported and respected by the abuse logic.
-- All sensitive endpoints, including /forgot-password, are rate-limited per IP and per endpoint.
-- If a /forgot-password request is suspicious, CAPTCHA (Cloudflare Turnstile) is required and verified before proceeding.
-- All abuse logs and flags are ephemeral (15 min expiry in Redis), and only metadata is stored (no sensitive data).
-- See service.py for further details and configuration.
+This module defines the **FastAPI router** for all authentication-related API endpoints,
+including user registration, login, email verification, token management, password operations,
+and Two-Factor Authentication (2FA). All business logic is delegated to the service layer.
 
-Defines API endpoints for user registration, login, email verification, token management,
-password change, and password reset. All business logic is delegated to the service layer.
+## Domain Overview
+
+The authentication system provides a comprehensive identity and access management solution:
+
+- **User Lifecycle**: Registration → Email Verification → Login → Session Management → Logout
+- **Token Management**: JWT-based access/refresh tokens + long-lived permanent API tokens
+- **Security**: 2FA (TOTP), password reset with abuse detection, rate limiting, audit logging
+- **Account Recovery**: Email-based password reset with CAPTCHA challenge for suspicious activity
+
+## Key Features
+
+### 1. Multi-Factor Authentication
+- **Standard Login**: Username/Email + Password
+- **2FA Support**: TOTP (Google Authenticator) + Backup Codes
+- **Setup Flow**: Generate secret → Scan QR → Verify code → Enable
+
+### 2. Advanced Abuse Prevention
+The password reset system includes sophisticated abuse detection:
+- **Real-time Logging**: All `/forgot-password` requests logged to Redis (email, IP, user-agent, timestamp)
+- **Heuristic Analysis**: Flags suspicious activity based on volume, unique IPs, and IP reputation (VPN/proxy/Tor)
+- **Adaptive Response**:
+  - **Normal**: Sends email immediately
+  - **Suspicious**: Returns 403 and requires CAPTCHA (Cloudflare Turnstile)
+  - **Blocked**: Temporarily blocks (email, IP) pair for 15 minutes
+- **Scoped Controls**: Whitelist/blocklist management for (email, IP) pairs
+- **Ephemeral Storage**: All abuse logs expire after 15 minutes (no long-term PII storage)
+
+### 3. Token Architecture
+- **Access Tokens**: Short-lived (15 min) JWTs for API authorization
+- **Refresh Tokens**: Long-lived (7 days) JWTs for silent token renewal
+- **Permanent Tokens**: Non-expiring API keys for machine-to-machine access (CI/CD, integrations)
+- **Blacklisting**: Revoked tokens stored in Redis to prevent reuse
+
+### 4. Rate Limiting
+All endpoints are protected with per-IP rate limits:
+- **Standard**: 100 requests per 60 seconds
+- **Sensitive**: 5 requests per 300 seconds (e.g., backup code regeneration)
+- **Verification**: 50 requests per 600 seconds (email resend)
+
+## API Endpoints
+
+### Core Authentication
+- `POST /auth/register` - Create new user account
+- `POST /auth/login` - Authenticate and obtain tokens
+- `POST /auth/refresh` - Refresh expired access token
+- `POST /auth/logout` - Invalidate current session
+- `GET /auth/validate-token` - Validate existing token
+
+### Email Verification
+- `GET /auth/verify-email` - Verify email via token
+- `POST /auth/resend-verification-email` - Resend verification link
+
+### Password Management
+- `PUT /auth/change-password` - Change password (authenticated)
+- `POST /auth/forgot-password` - Initiate password reset
+- `POST /auth/reset-password` - Complete password reset
+
+### Two-Factor Authentication
+- `POST /auth/2fa/setup` - Initiate 2FA setup
+- `POST /auth/2fa/verify` - Verify and activate 2FA
+- `GET /auth/2fa/status` - Get current 2FA status
+- `POST /auth/2fa/disable` - Disable 2FA
+- `GET /auth/2fa/backup-codes` - View backup codes
+- `POST /auth/2fa/regenerate-backup-codes` - Generate new backup codes
+
+### Utilities
+- `GET /auth/check-username` - Check username availability
+- `GET /auth/check-email` - Check email availability
+- `GET /auth/security-dashboard` - Get security score and recommendations
+
+## Usage Examples
+
+### Standard Registration and Login
+
+```python
+# 1. Register
+response = await client.post("/auth/register", json={
+    "username": "john_doe",
+    "email": "john@example.com",
+    "password": "SecurePassword123!"
+})
+access_token = response.json()["access_token"]
+
+# 2. Verify email (user clicks link in email)
+await client.get(f"/auth/verify-email?token={verification_token}")
+
+# 3. Login
+response = await client.post("/auth/login", json={
+    "username": "john_doe",
+    "password": "SecurePassword123!"
+})
+tokens = response.json()
+```
+
+### 2FA Setup Flow
+
+```python
+# 1. Initiate setup
+setup = await client.post("/auth/2fa/setup", 
+    json={"method": "totp"},
+    headers={"Authorization": f"Bearer {access_token}"}
+)
+qr_code = setup.json()["qr_code_data"]
+
+# 2. User scans QR code with authenticator app
+
+# 3. Verify setup
+await client.post("/auth/2fa/verify",
+    json={"method": "totp", "code": "123456"},
+    headers={"Authorization": f"Bearer {access_token}"}
+)
+```
+
+## Security Considerations
+
+### Password Reset Abuse Detection
+The system tracks and analyzes password reset patterns:
+- **Volume Threshold**: >5 requests in 15 minutes triggers review
+- **IP Diversity**: Requests from >3 unique IPs indicates targeted abuse
+- **Reputation**: VPN/proxy/Tor IPs are flagged
+- **User Notification**: Suspicious activity triggers email alerts
+
+### Rate Limiting Strategy
+- **Per-IP**: Prevents brute-force from single source
+- **Per-Endpoint**: Granular control for sensitive operations
+- **Adaptive**: Failed attempts may trigger stricter limits
+
+### Audit Logging
+All authentication events are logged to the `logs` collection:
+- Login attempts (success/failure, IP, user-agent, 2FA status)
+- Registration attempts (success/failure, plan, role)
+- Password changes and resets
+- 2FA setup/disable events
+
+## Module Attributes
+
+Attributes:
+    router (APIRouter): FastAPI router with `/auth` prefix
+    oauth2_scheme (OAuth2PasswordBearer): OAuth2 token extractor
+    ACCESS_TOKEN_EXPIRE_MINUTES (int): Access token lifetime (15 min)
+    REFRESH_TOKEN_EXPIRE_DAYS (int): Refresh token lifetime (7 days)
 """
 
 from contextlib import asynccontextmanager
@@ -271,8 +404,35 @@ async def register(user: UserIn, request: Request) -> JSONResponse:
     """
     Register a new user account with comprehensive validation and security features.
 
-    This endpoint creates a new user account, sends an email verification link,
-    and returns a JWT token for immediate API access.
+    This endpoint orchestrates the user registration process, ensuring that all security
+    policies are enforced before creating an account.
+
+    **Process Flow:**
+    1.  **Rate Limiting**: Checks if the client IP has exceeded the registration rate limit.
+    2.  **Logging**: Initializes a `RegistrationLog` entry to track the attempt.
+    3.  **Validation**: Pydantic model (`UserIn`) validates username, email, and password strength.
+    4.  **Creation**: Calls `register_user` service to create the user document in MongoDB.
+    5.  **Verification**: Generates a verification token and sends an email with a unique link.
+    6.  **Token Issuance**: Generates an initial access token for immediate API access.
+    7.  **Audit**: Logs the successful registration outcome.
+
+    **Security Measures:**
+    *   **Password Hashing**: Passwords are hashed using bcrypt before storage.
+    *   **Input Sanitization**: Usernames and emails are normalized to lowercase.
+    *   **Conflict Detection**: Checks for existing usernames or emails to prevent duplicates.
+    *   **Audit Trail**: Detailed logs of success/failure, including IP and user agent.
+
+    Args:
+        user (UserIn): The user registration data (username, email, password, etc.).
+        request (Request): The raw HTTP request object (used for IP extraction and rate limiting).
+
+    Returns:
+        JSONResponse: A JSON object containing the access token and user profile.
+
+    Raises:
+        HTTPException(409): If the username or email already exists.
+        HTTPException(429): If the rate limit is exceeded.
+        HTTPException(500): If an internal server error occurs (e.g., email sending failure).
     """
     await security_manager.check_rate_limit(request, "register")
     reg_log = RegistrationLog(
@@ -327,7 +487,35 @@ async def register(user: UserIn, request: Request) -> JSONResponse:
 @router.get("/verify-email")
 @log_performance("email_verification")
 async def verify_email(request: Request, token: str = None, username: str = None):
-    """Verify user's email using the provided token or username."""
+    """
+    Verify a user's email address using a secure token or username check.
+
+    This endpoint handles the email verification process, which is critical for account security
+    and unlocking full platform features. It supports two modes:
+    1.  **Token Verification**: Validates a unique token sent via email. This is the primary method.
+    2.  **Status Check**: Checks if a specific username is already verified (used by frontend).
+
+    **Behavior:**
+    *   **Browser Clients**: Renders an HTML page with success/failure messages for a better UX.
+    *   **API Clients**: Returns a JSON response with status details.
+
+    **Security Checks:**
+    *   **Rate Limiting**: specific limits for verification attempts to prevent brute-force.
+    *   **Token Expiry**: Verification tokens have a limited lifespan.
+    *   **Idempotency**: Repeated calls for an already verified user return success (or specific message).
+
+    Args:
+        request (Request): The HTTP request object.
+        token (str, optional): The verification token from the email link.
+        username (str, optional): The username to check verification status for.
+
+    Returns:
+        Union[HTMLResponse, JSONResponse]: HTML page or JSON status based on client type.
+
+    Raises:
+        HTTPException(400): If token/username is missing or invalid.
+        HTTPException(429): If rate limit is exceeded.
+    """
     # Extract request info and set context
     request_info = extract_request_info(request)
     set_auth_logging_context(ip_address=request_info["ip_address"])
@@ -561,10 +749,41 @@ async def verify_email(request: Request, token: str = None, username: str = None
 )
 async def login(request: Request, login_request: Optional[LoginRequest] = Body(None)) -> JSONResponse:
     """
-    Authenticate user credentials and return JWT token.
+    Authenticate user credentials and issue JWT access/refresh tokens.
 
-    Supports multiple authentication flows including standard login and 2FA.
-    Compatible with both JSON requests and OAuth2 form data.
+    This is the primary authentication endpoint, supporting multiple flows and client types.
+    It handles standard username/password login as well as Two-Factor Authentication (2FA).
+
+    **Authentication Flows:**
+    1.  **Standard Login**: User provides `username` (or `email`) and `password`.
+        *   If valid and 2FA is disabled: Returns tokens.
+        *   If valid and 2FA is enabled: Returns 422 with `two_fa_required=True` and available methods.
+    2.  **2FA Login**: User provides credentials plus `two_fa_code` and `two_fa_method`.
+        *   Validates password and 2FA code (TOTP or backup code).
+        *   If both valid: Returns tokens.
+
+    **Input Handling:**
+    *   **JSON**: Accepts `LoginRequest` body (preferred for modern clients).
+    *   **Form Data**: Accepts `application/x-www-form-urlencoded` (OAuth2 standard compatible).
+
+    **Security Features:**
+    *   **Rate Limiting**: Strict limits per IP to prevent brute-force attacks.
+    *   **Account Locking**: (Implemented in service) Locks account after N failed attempts.
+    *   **Audit Logging**: detailed logs of every attempt (success/failure, IP, reason).
+    *   **Trusted IP**: Tracks successful logins to build a trusted IP history.
+
+    Args:
+        request (Request): The HTTP request object.
+        login_request (Optional[LoginRequest]): The parsed JSON body (if content-type is JSON).
+
+    Returns:
+        JSONResponse: Contains `access_token`, `refresh_token`, and user profile data.
+
+    Raises:
+        HTTPException(401): Invalid credentials.
+        HTTPException(403): Email not verified (if policy requires it).
+        HTTPException(422): 2FA required (client should prompt user for code).
+        HTTPException(429): Rate limit exceeded.
     """
     await security_manager.check_rate_limit(request, "login")
 
@@ -820,10 +1039,31 @@ async def login(request: Request, login_request: Optional[LoginRequest] = Body(N
 @log_performance("token_refresh")
 async def refresh_token(request: Request, refresh_token: str = Body(..., embed=True)):
     """
-    Refresh access token using refresh token.
+    Refresh an expired access token using a valid refresh token.
 
-    Validates the refresh token and generates new access token.
-    Optionally rotates refresh token if ENABLE_TOKEN_ROTATION is true.
+    This endpoint enables the "silent refresh" pattern, allowing clients to maintain
+    a seamless session without forcing the user to re-login frequently.
+
+    **Mechanism:**
+    1.  Validates the provided `refresh_token` (signature, expiry, blacklist status).
+    2.  Checks if the user account is still active and valid.
+    3.  Issues a new `access_token` with a short lifespan (15 minutes).
+    4.  Optionally rotates the `refresh_token` itself (if configured) to prevent replay attacks.
+
+    **Security:**
+    *   **Token Rotation**: If enabled, the old refresh token is invalidated immediately.
+    *   **Reuse Detection**: Attempting to use an old refresh token can trigger a security alert
+        and invalidate all tokens for that user.
+
+    Args:
+        request (Request): The HTTP request object.
+        refresh_token (str): The long-lived refresh token.
+
+    Returns:
+        Token: A new token pair (or just access token).
+
+    Raises:
+        HTTPException(401): If the refresh token is invalid, expired, or revoked.
     """
     from second_brain_database.routes.auth.services.auth.refresh import refresh_access_token
     
@@ -842,18 +1082,27 @@ async def refresh_token(request: Request, refresh_token: str = Body(..., embed=T
 async def logout(
     request: Request, current_user: dict = Depends(enforce_all_lockdowns), token: str = Depends(oauth2_scheme)
 ):
-    """Logout user and invalidate the current JWT token.
+    """
+    Securely log out the current user and invalidate their session.
 
-    This endpoint securely logs out the user by adding the current JWT token to a server-side blacklist.
-    Once blacklisted, the token can no longer be used for authentication, even if it has not expired.
+    This endpoint ensures that the current access token can no longer be used for authentication.
+    It is a critical component of the security lifecycle, especially for public or shared devices.
+
+    **Process:**
+    1.  **Blacklisting**: The current JWT access token is added to a Redis-backed blacklist.
+    2.  **Audit**: The logout event is logged for security monitoring.
+
+    **Note**: This only invalidates the *current* access token. Refresh tokens should also be
+    discarded by the client. For a complete "sign out everywhere" feature, use the
+    `revoke_all_sessions` endpoint (if available).
 
     Args:
-        request (Request): The incoming request object.
-        current_user (dict): The authenticated user, injected by Depends.
-        token (str): The JWT token to be invalidated, injected by Depends.
+        request (Request): The HTTP request object.
+        current_user (dict): The authenticated user.
+        token (str): The JWT access token to invalidate.
 
     Returns:
-        dict: A message confirming successful logout.
+        dict: A success message.
     """
     # Extract request info and set context
     request_info = extract_request_info(request)
@@ -887,18 +1136,28 @@ async def change_password(
     current_user: dict = Depends(enforce_all_lockdowns),
     request: Request = None,
 ):
-    """Change the password for the current authenticated user.
+    """
+    Update the authenticated user's password.
 
-    This endpoint allows an authenticated user to change their password.
-    For security, this action should require recent authentication (e.g., re-entering the current password).
+    This endpoint allows users to change their password while logged in. It enforces
+    strict security checks to prevent unauthorized changes.
+
+    **Security Requirements:**
+    *   **Old Password Verification**: The user must provide their current password to prove ownership.
+    *   **Strength Check**: The new password must meet the same complexity requirements as registration.
+    *   **Session Invalidation**: (Optional) Changing the password may invalidate existing sessions
+        depending on the configuration (via `token_version` increment).
 
     Args:
-        password_request (PasswordChangeRequest): An object containing the user's current password and the new password.
-        current_user (dict): The authenticated user, injected by Depends.
-        request (Request): The incoming request object.
+        password_request (PasswordChangeRequest): Contains `old_password` and `new_password`.
+        current_user (dict): The authenticated user.
+        request (Request): The HTTP request object.
 
     Returns:
-        dict: A message confirming the password was changed successfully.
+        dict: A success message.
+
+    Raises:
+        HTTPException(400): If the old password is incorrect or new password is weak.
     """
     await security_manager.check_rate_limit(request, "change-password")
     # Recent password confirmation or re-login should be required for sensitive actions in production
@@ -917,20 +1176,36 @@ async def change_password(
 @router.post("/forgot-password")
 async def forgot_password(request: Request, payload: Optional[Dict[str, Any]] = Body(default=None)) -> Dict[str, Any]:
     """
-    Initiate password reset process by sending a reset link to the user's email.
-    Accepts JSON or query param.
-    If abuse detection flags the request as suspicious,
-    require and verify Turnstile CAPTCHA.
-    SECURITY NOTE:
-    Rate limiting is always enforced via
-    security_manager.check_rate_limit BEFORE any abuse/whitelist logic.
+    Initiate the password reset process with advanced abuse detection.
+
+    This endpoint handles "forgot password" requests by sending a secure reset link to the user's email.
+    It includes a sophisticated abuse detection system to prevent spam and targeted attacks.
+
+    **Abuse Prevention System:**
+    1.  **Rate Limiting**: Strict limits per IP and email.
+    2.  **Heuristics**: Analyzes request patterns (volume, unique IPs, velocity).
+    3.  **Reputation**: Checks IP reputation (VPN, proxy, Tor).
+    4.  **Action**:
+        *   **Normal**: Sends email immediately.
+        *   **Suspicious**: Returns 403 and requires CAPTCHA (Turnstile) verification.
+        *   **Blocked**: Temporarily blocks the IP/Email pair if abuse is severe.
+
+    **Flow:**
+    1.  Client submits email.
+    2.  Server checks for abuse.
+    3.  If safe, server generates a secure token and emails it.
+    4.  Client uses the token at `/reset-password`.
+
     Args:
-        request: FastAPI request object
-        payload: Optional dict with email and turnstile_token
+        request (Request): The HTTP request object.
+        payload (Optional[Dict]): JSON body containing `email` (and optional `turnstile_token`).
+
     Returns:
-        Dict with status message and abuse info
-    Side-effects:
-        Writes to Redis, logs abuse, sends email
+        Dict: Status message and abuse detection results (if any).
+
+    Raises:
+        HTTPException(403): If abuse is detected and CAPTCHA is required or user is blocked.
+        HTTPException(429): If rate limit is exceeded.
     """
     await security_manager.check_rate_limit(request, "forgot-password")
     email: Optional[str] = None
@@ -1051,17 +1326,22 @@ async def forgot_password(request: Request, payload: Optional[Dict[str, Any]] = 
 # Rate limit: resend-verification-email: 1 request per 600 seconds per IP
 @router.post("/resend-verification-email")
 async def resend_verification_email(request: Request):
-    """Resend the verification email to a user.
+    """
+    Resend the account verification email.
 
-    This endpoint allows a user to request a new verification email if they have not yet verified their account.
-    It accepts either an email or a username in the JSON body.
-    To prevent abuse, this endpoint is heavily rate-limited.
+    This endpoint allows users to request a new verification link if the previous one
+    expired or was lost. It is critical for user onboarding but prone to abuse,
+    so it is heavily protected.
+
+    **Security:**
+    *   **Strict Rate Limiting**: 1 request per 10 minutes (default) to prevent email spam.
+    *   **Abuse Detection**: Integrated with the same abuse detection system as password reset.
 
     Args:
-        request (Request): The incoming request object, containing the user's email or username in the body.
+        request (Request): JSON body with `email` or `username`.
 
     Returns:
-        dict: A message confirming that the verification email has been sent.
+        dict: Success message.
     """
     await security_manager.check_rate_limit(
         request, "resend-verification-email", rate_limit_requests=50, rate_limit_period=600
@@ -1136,17 +1416,22 @@ async def resend_verification_email(request: Request):
 # Rate limit: check-username: 100 requests per 60 seconds per IP (default)
 @router.get("/check-username")
 async def check_username(request: Request, username: str = Query(..., min_length=3, max_length=50)):
-    """Check if a username is available.
+    """
+    Check if a username is available for registration.
 
-    This endpoint checks for the availability of a username. It queries the database for an exact match
-    and also uses Redis to track the demand for usernames.
+    This endpoint is used by the frontend to provide real-time feedback during sign-up.
+    It also tracks username demand to identify popular or high-value usernames.
+
+    **Features:**
+    *   **Availability Check**: Queries the database for exact case-insensitive matches.
+    *   **Demand Tracking**: Increments a counter in Redis to track how often a username is requested.
 
     Args:
-        request (Request): The incoming request object.
-        username (str): The username to check.
+        request (Request): The HTTP request object.
+        username (str): The username to check (3-50 chars).
 
     Returns:
-        dict: A dictionary containing the username and a boolean indicating its availability.
+        dict: `{"username": str, "available": bool}`
     """
     await security_manager.check_rate_limit(request, "check-username")
     await redis_incr_username_demand(username)
@@ -1158,16 +1443,22 @@ async def check_username(request: Request, username: str = Query(..., min_length
 # Rate limit: check-email: 100 requests per 60 seconds per IP (default)
 @router.get("/check-email")
 async def check_email(request: Request, email: str = Query(...)):
-    """Check if an email is available.
+    """
+    Check if an email address is already registered.
 
-    This endpoint checks if an email address is already associated with an existing account in the database.
+    This endpoint helps the frontend guide users to login instead of register if they
+    already have an account.
+
+    **Privacy Note:**
+    To prevent user enumeration, this endpoint should be rate-limited and potentially
+    restricted in production. Currently, it returns a simple boolean.
 
     Args:
-        request (Request): The incoming request object.
-        email (str): The email address to check.
+        request (Request): The HTTP request object.
+        email (str): The email to check.
 
     Returns:
-        dict: A dictionary containing the email and a boolean indicating its availability.
+        dict: `{"email": str, "available": bool}`
     """
     await security_manager.check_rate_limit(request, "check-email")
     exists = await db_manager.get_collection("users").find_one({"email": email})
@@ -1177,17 +1468,19 @@ async def check_email(request: Request, email: str = Query(...)):
 # Rate limit: username-demand: 100 requests per 60 seconds per IP (default)
 @router.get("/username-demand")
 async def username_demand(request: Request, top_n: int = 10):
-    """Get the most in-demand usernames.
+    """
+    Retrieve the most requested usernames.
 
-    This endpoint retrieves a list of the most frequently checked usernames from Redis,
-    which can be used to gauge interest in certain usernames.
+    This analytics endpoint returns the top `N` usernames that have been checked via
+    the `/check-username` endpoint. It is useful for identifying trends or potential
+    squatting targets.
 
     Args:
-        request (Request): The incoming request object.
-        top_n (int, optional): The number of top usernames to return. Defaults to 10.
+        request (Request): The HTTP request object.
+        top_n (int): Number of results to return (default 10).
 
     Returns:
-        list: A list of dictionaries, each containing a username and the number of times it has been checked.
+        list: List of `{"username": str, "checks": int}` objects.
     """
     await security_manager.check_rate_limit(request, "username-demand")
     most_demanded = await redis_get_top_demanded_usernames(top_n=top_n)
@@ -1198,8 +1491,28 @@ async def username_demand(request: Request, top_n: int = 10):
 @router.post("/2fa/setup", response_model=TwoFASetupResponse)
 async def setup_two_fa(req: Request, request: TwoFASetupRequest, current_user: dict = Depends(enforce_all_lockdowns)):
     """
-    Setup a 2FA method for the current user and return TOTP secret, provisioning URI, QR code image, and backup codes.
-    If a 2FA setup is already pending, returns the existing setup information instead of generating a new one.
+    Initiate the setup process for Two-Factor Authentication (2FA).
+
+    This endpoint generates the necessary secrets and metadata to configure a 2FA method
+    (typically TOTP via an authenticator app).
+
+    **Process:**
+    1.  Generates a secure random secret key.
+    2.  Creates a provisioning URI (otpauth://) for QR code generation.
+    3.  Generates a set of one-time backup codes.
+    4.  Stores the *pending* setup in the user's record (not active until verified).
+
+    **Idempotency:**
+    If a setup is already pending, it returns the existing secret/QR code instead of
+    generating a new one, allowing the user to retry scanning without resetting the flow.
+
+    Args:
+        req (Request): The HTTP request object.
+        request (TwoFASetupRequest): Specifies the method (e.g., 'totp').
+        current_user (dict): The authenticated user.
+
+    Returns:
+        TwoFASetupResponse: Contains secret, provisioning URI, and backup codes.
     """
     await security_manager.check_rate_limit(req, "2fa-setup")
     # Recent password confirmation or re-login should be required for sensitive actions in production
@@ -1210,7 +1523,25 @@ async def setup_two_fa(req: Request, request: TwoFASetupRequest, current_user: d
 # Rate limit: 2fa-verify: 100 requests per 60 seconds per IP (default)
 @router.post("/2fa/verify", response_model=TwoFAStatus)
 async def verify_two_fa(req: Request, request: TwoFAVerifyRequest, current_user: dict = Depends(enforce_all_lockdowns)):
-    """Verify a 2FA code for the current user."""
+    """
+    Verify and activate a pending 2FA setup.
+
+    This is the second step of the 2FA setup flow. The user must provide a valid code
+    generated by their authenticator app to prove they have successfully scanned the QR code.
+
+    **Action:**
+    *   Validates the provided TOTP code against the pending secret.
+    *   If valid: Marks 2FA as `enabled` and clears the pending status.
+    *   If invalid: Returns an error, keeping the setup in pending state.
+
+    Args:
+        req (Request): The HTTP request object.
+        request (TwoFAVerifyRequest): Contains the verification code.
+        current_user (dict): The authenticated user.
+
+    Returns:
+        TwoFAStatus: The updated 2FA status (enabled=True).
+    """
     await security_manager.check_rate_limit(req, "2fa-verify")
     return await verify_2fa(current_user, request)
 
@@ -1218,7 +1549,19 @@ async def verify_two_fa(req: Request, request: TwoFAVerifyRequest, current_user:
 # Rate limit: 2fa-status: 100 requests per 60 seconds per IP (default)
 @router.get("/2fa/status", response_model=TwoFAStatus)
 async def get_two_fa_status(request: Request, current_user: dict = Depends(enforce_all_lockdowns)):
-    """Get 2FA status for the current user."""
+    """
+    Retrieve the current Two-Factor Authentication status.
+
+    This endpoint allows the frontend to determine if 2FA is enabled, which methods are active,
+    and if there are any pending setups.
+
+    Args:
+        request (Request): The HTTP request object.
+        current_user (dict): The authenticated user.
+
+    Returns:
+        TwoFAStatus: Object containing `enabled`, `methods`, and `pending` flags.
+    """
     await security_manager.check_rate_limit(request, "2fa-status")
     return await get_2fa_status(current_user)
 
@@ -1226,10 +1569,23 @@ async def get_two_fa_status(request: Request, current_user: dict = Depends(enfor
 # Rate limit: 2fa-disable: 100 requests per 60 seconds per IP (default)
 @router.post("/2fa/disable", response_model=TwoFAStatus)
 async def disable_two_fa(request: Request, current_user: dict = Depends(enforce_all_lockdowns)):
-    """Disable all 2FA for the current user."""
-    await security_manager.check_rate_limit(request, "2fa-disable")
-    # Recent password confirmation or re-login should be required for sensitive actions in production
-    return await disable_2fa(current_user)
+    """
+    Disable Two-Factor Authentication for the user.
+
+    This action removes all 2FA configurations (secrets, backup codes) from the user's account.
+    It reverts the account to single-factor authentication (password only).
+
+    **Security Warning:**
+    This is a high-risk action. In a production environment, it should require
+    re-authentication (sudo mode) or a confirmation email.
+
+    Args:
+        request (Request): The HTTP request object.
+        current_user (dict): The authenticated user.
+
+    Returns:
+        TwoFAStatus: Updated status (enabled=False).
+    """
 
 
 # Rate limit: is-verified: 100 requests per 60 seconds per IP (default)
@@ -1253,17 +1609,24 @@ async def is_verified(request: Request, current_user: dict = Depends(enforce_all
 # Rate limit: validate-token: 100 requests per 60 seconds per IP (default)
 @router.get("/validate-token")
 async def validate_token(token: str = Depends(oauth2_scheme), request: Request = None):
-    """Validate a JWT access token.
+    """
+    Validate an existing JWT access token and retrieve user details.
 
-    This endpoint checks the validity of a JWT access token. If the token is valid and the user is verified,
-    it returns user information similar to the login response.
+    This endpoint is used by the frontend to check if a stored token is still valid
+    and to hydrate the user session state on page load.
+
+    **Checks:**
+    1.  **Signature**: Verifies the JWT signature using the server's secret key.
+    2.  **Expiry**: Checks if the token has expired.
+    3.  **User Status**: Verifies the user exists, is active, and is verified.
+    4.  **Blacklist**: Checks if the token has been explicitly revoked (logout).
 
     Args:
-        token (str): The JWT token to validate, injected by Depends.
-        request (Request): The incoming request object.
+        token (str): The JWT token (extracted from Authorization header).
+        request (Request): The HTTP request object.
 
     Returns:
-        dict: A dictionary containing user information if the token is valid, or an error message if it is not.
+        dict: User profile and token metadata if valid, or error details if invalid.
     """
     await security_manager.check_rate_limit(request, "validate-token")
     try:
@@ -1321,17 +1684,24 @@ async def get_2fa_setup_guide(current_user: dict = Depends(enforce_all_lockdowns
 # Rate limit: security-dashboard: 100 requests per 60 seconds per IP (default)
 @router.get("/security-dashboard")
 async def get_security_dashboard(current_user: dict = Depends(enforce_all_lockdowns), request: Request = None):
-    """Get a security overview for the current user.
+    """
+    Get a comprehensive security overview for the current user.
 
-    This endpoint provides a security dashboard for the authenticated user, including a security score
-    and the status of various security-related settings.
+    This endpoint aggregates various security metrics to provide the user with a "Security Score"
+    and actionable insights to improve their account security.
+
+    **Metrics:**
+    *   **Email Verification**: +20 points.
+    *   **2FA Enabled**: +40 points.
+    *   **Password Strength**: +20 points (assumed if account exists).
+    *   **Recent Activity**: +20 points (if last login is tracked).
 
     Args:
-        current_user (dict): The authenticated user, injected by Depends.
-        request (Request): The incoming request object.
+        current_user (dict): The authenticated user.
+        request (Request): The HTTP request object.
 
     Returns:
-        dict: A dictionary containing the user's security score and the status of their security settings.
+        dict: Security score (0-100) and status of individual security features.
     """
     await security_manager.check_rate_limit(request, "security-dashboard")
 
@@ -1361,17 +1731,21 @@ async def get_security_dashboard(current_user: dict = Depends(enforce_all_lockdo
 # Rate limit: 2fa-backup-codes: 5 requests per 300 seconds per IP (restricted)
 @router.get("/2fa/backup-codes")
 async def get_backup_codes_status(current_user: dict = Depends(enforce_all_lockdowns), request: Request = None):
-    """Get the status of 2FA backup codes.
+    """
+    Retrieve the status of 2FA backup codes.
 
-    This endpoint returns the number of total, used, and remaining 2FA backup codes for the user.
-    For security reasons, it does not return the actual codes.
+    This endpoint allows the user to see how many backup codes they have remaining.
+    It does **not** return the codes themselves, only the counts.
+
+    **Usage:**
+    Useful for prompting the user to regenerate codes when they are running low.
 
     Args:
-        current_user (dict): The authenticated user, injected by Depends.
-        request (Request): The incoming request object.
+        current_user (dict): The authenticated user.
+        request (Request): The HTTP request object.
 
     Returns:
-        dict: A dictionary with the total, used, and remaining backup code counts.
+        dict: `{"total_codes": int, "used_codes": int, "remaining_codes": int}`
     """
     await security_manager.check_rate_limit(request, "2fa-backup-codes", rate_limit_requests=5, rate_limit_period=300)
 
@@ -1391,17 +1765,22 @@ async def get_backup_codes_status(current_user: dict = Depends(enforce_all_lockd
 # Rate limit: 2fa-regenerate-backup: 20 requests per 3600 (1hr) seconds per IP (increased for testing)
 @router.post("/2fa/regenerate-backup-codes")
 async def regenerate_backup_codes(current_user: dict = Depends(enforce_all_lockdowns), request: Request = None):
-    """Regenerate 2FA backup codes.
+    """
+    Regenerate a new set of 2FA backup codes.
 
-    This endpoint generates a new set of 2FA backup codes for the user.
-    This action invalidates all previously existing backup codes.
+    This action invalidates all previous backup codes and generates a fresh set of 10 codes.
+    This is useful if the user has used most of their codes or suspects they may have been compromised.
+
+    **Security:**
+    *   **Hashing**: Codes are hashed (bcrypt) before storage, so the server cannot see them later.
+    *   **One-Time View**: The codes are returned in the response *once*. The user must save them immediately.
 
     Args:
-        current_user (dict): The authenticated user, injected by Depends.
-        request (Request): The incoming request object.
+        current_user (dict): The authenticated user.
+        request (Request): The HTTP request object.
 
     Returns:
-        dict: A message confirming the action and the new set of backup codes.
+        dict: Contains the list of new plain-text backup codes.
     """
     # Increased rate limit for testing purposes doing it 200 times per hour
     await security_manager.check_rate_limit(
@@ -1442,16 +1821,30 @@ async def reset_two_fa(
 # Rate limit: reset-password: 100 requests per 60 seconds per IP (default)
 @router.post("/reset-password")
 async def reset_password(payload: dict = Body(...)):
-    """Reset the user's password using a valid reset token.
+    """
+    Complete the password reset process.
 
-    This endpoint allows a user to reset their password by providing a valid password reset token and a new password.
-    The token is sent to the user's email address via the /forgot-password endpoint.
+    This endpoint accepts a secure token (received via email) and a new password.
+    It verifies the token and updates the user's credentials.
+
+    **Security Checks:**
+    1.  **Token Validity**: Checks if the token exists and matches the hashed version in the DB.
+    2.  **Token Expiry**: Verifies that the token has not expired (default 15 mins).
+    3.  **Password Strength**: Validates the new password against complexity rules.
+
+    **Post-Reset Actions:**
+    *   **Session Revocation**: Increments `token_version` to invalidate all existing JWTs.
+    *   **Cleanup**: Removes the used reset token from the user record.
+    *   **Notification**: Sends a confirmation email to the user.
 
     Args:
-        payload (dict): A dictionary containing the password reset token and the new password.
+        payload (dict): `{"token": str, "new_password": str}`
 
     Returns:
-        dict: A message confirming that the password has been reset successfully.
+        dict: Success message.
+
+    Raises:
+        HTTPException(400): Invalid token, expired token, or weak password.
     """
     token = payload.get("token")
     new_password = payload.get("new_password")

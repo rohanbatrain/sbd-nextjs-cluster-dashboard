@@ -83,17 +83,7 @@ class RAGService:
             }
         )
 
-    async def query_document(
-        self,
-        query: str,
-        document_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        top_k: Optional[int] = None,
-        use_llm: bool = True,
-        model: Optional[str] = None,
-        temperature: float = 0.7,
-        tenant_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+
     async def query_document(
         self,
         query: str,
@@ -240,16 +230,6 @@ class RAGService:
         stream: bool = False,
         tenant_id: Optional[str] = None,
     ) -> Dict[str, Any] | AsyncGenerator[str, None]:
-    async def chat_with_documents(
-        self,
-        messages: List[Dict[str, str]],
-        document_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        model: Optional[str] = None,
-        temperature: float = 0.7,
-        stream: bool = False,
-        tenant_id: Optional[str] = None,
-    ) -> Dict[str, Any] | AsyncGenerator[str, None]:
         """
         Conduct a multi-turn chat conversation with document context.
 
@@ -360,16 +340,8 @@ class RAGService:
         self,
         document_id: str,
         analysis_type: str = "summary",
+        user_id: Optional[str] = None,
         model: Optional[str] = None,
-        temperature: float = 0.7,
-        tenant_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
-    async def analyze_document_with_llm(
-        self,
-        document_id: str,
-        analysis_type: str = "summary",
-        model: Optional[str] = None,
-        temperature: float = 0.7,
         tenant_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
@@ -458,12 +430,12 @@ class RAGService:
         except Exception as e:
             logger.error(
                 f"Document analysis failed: {e}",
-                exc_info=True,
+        exc_info=True,
                 extra={"document_id": document_id, "analysis_type": analysis_type}
             )
             raise
 
-    def _build_context(self, chunks: List[Dict[str, Any]]) -> str:
+
     def _build_context(self, chunks: List[Dict[str, Any]]) -> str:
         """
         Construct a context string from retrieved content chunks.
@@ -499,13 +471,7 @@ class RAGService:
 
         return "\n".join(context_parts)
 
-    async def _generate_answer(
-        self,
-        query: str,
-        context: str,
-        model: Optional[str] = None,
-        temperature: float = 0.7,
-    ) -> str:
+
     async def _generate_answer(
         self,
         query: str,

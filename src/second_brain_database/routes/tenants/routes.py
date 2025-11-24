@@ -1,5 +1,44 @@
 """
-Tenant management routes for multi-tenancy support.
+# Tenant Routes
+
+This module provides the **REST API endpoints** for Tenant Management.
+It handles the lifecycle of tenants, from creation to member management and switching.
+
+## Domain Overview
+
+The Tenant system is the backbone of multi-tenancy in the application.
+It allows users to:
+- **Create**: Provision new organizations/workspaces.
+- **Switch**: Change their active context to access different resources.
+- **Manage**: Add members, update settings, and upgrade plans.
+
+## Key Features
+
+### 1. Tenant Lifecycle
+- **Provisioning**: Creates tenant, sets owner, and initializes defaults.
+- **Resource Limits**: Enforces plan-based quotas (users, storage, API calls).
+
+### 2. Context Switching
+- **Session Management**: Updates the user's "primary tenant" pointer.
+- **Token Refresh**: Issues new JWTs scoped to the selected tenant.
+
+## API Endpoints
+
+- `POST /tenants` - Create new tenant
+- `POST /tenants/switch` - Switch active tenant
+- `GET /tenants/my` - List user's tenants
+- `GET /tenants/{id}` - Get tenant details
+
+## Usage Example
+
+### Switching Tenant
+
+```python
+response = await client.post("/tenants/switch", json={
+    "tenant_id": "tenant_abc123"
+})
+new_token = response["access_token"]
+```
 """
 
 from datetime import datetime

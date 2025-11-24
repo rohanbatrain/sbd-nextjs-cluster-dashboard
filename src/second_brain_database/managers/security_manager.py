@@ -24,7 +24,26 @@ RATE_LIMITED_MSG: str = "Too many requests. Please try again later."
 
 class SecurityManager:
     """
-    Manages rate limiting and blacklisting for API endpoints using Redis.
+    Manages API security through rate limiting, IP blacklisting, and abuse prevention.
+
+    Provides comprehensive protection against:
+    - **DDoS attacks**: Per-IP rate limiting with configurable thresholds
+    - **Brute force**: Automatic IP blacklisting after repeated violations
+    - **IP lockdown**: Restrict user access to trusted IPs only
+    - **User-Agent lockdown**: Restrict access to trusted browsers/clients
+
+    **Features:**
+    - Redis-based distributed rate limiting (works across cluster nodes)
+    - Lua script optimization for atomic operations
+    - Automatic blacklist expiration
+    - Trusted IP bypass (localhost, configured IPs)
+    - Comprehensive audit logging
+
+    **Configuration:**
+    - `RATE_LIMIT_REQUESTS`: Max requests per period (default: 100)
+    - `RATE_LIMIT_PERIOD_SECONDS`: Time window (default: 60s)
+    - `BLACKLIST_THRESHOLD`: Violations before blacklist (default: 5)
+    - `BLACKLIST_DURATION`: Blacklist duration in seconds (default: 3600s)
     """
 
     def __init__(self) -> None:

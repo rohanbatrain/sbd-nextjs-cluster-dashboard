@@ -1,21 +1,75 @@
 """
-Consolidated RAG API Routes
+# RAG System Routes
 
-Complete REST API endpoints for RAG system with Celery integration for async processing.
-Combines document upload, processing, querying, and system management in a unified interface.
+This module provides the **REST API endpoints** for the Retrieval-Augmented Generation (RAG) system.
+It consolidates document ingestion, vector search, and AI-powered Q&A into a unified interface.
 
-Features:
-- Document upload with sync/async processing
-- RAG queries with conversation support  
-- Vector search capabilities
-- Batch processing via Celery
-- System health monitoring
-- Cache management
-- Analytics and reporting
+## Domain Overview
 
-Usage:
-    from .routes import rag
-    app.include_router(rag.router, prefix="/api")
+The RAG System bridges the gap between static documents and dynamic AI intelligence:
+- **Ingestion**: Uploads and processes files (PDF, DOCX, etc.) into vector embeddings.
+- **Retrieval**: Finds relevant context using semantic and keyword search.
+- **Generation**: Uses LLMs (e.g., GPT-4, Llama 3) to answer questions based on retrieved context.
+- **Orchestration**: Manages the pipeline from upload to answer generation.
+
+## Key Features
+
+### 1. Document Ingestion
+- **Unified Upload**: Single endpoint for various file types.
+- **Async Processing**: Celery integration for handling large files without blocking.
+- **Batch Operations**: Bulk processing capabilities for data migration.
+
+### 2. Advanced Querying
+- **Hybrid Search**: Combines Dense (Vector) and Sparse (Keyword) retrieval.
+- **Conversation Memory**: Maintains context across multi-turn chats.
+- **Source Attribution**: Returns exact citations (text chunks) for every answer.
+
+### 3. System Management
+- **Task Monitoring**: Track status of async ingestion jobs.
+- **Cache Control**: Warm-up or clear vector caches for performance.
+- **Analytics**: Track usage, latency, and query quality.
+
+## API Endpoints
+
+### Ingestion
+- `POST /rag/documents/upload` - Upload single file
+- `POST /rag/batch/process` - Bulk process documents
+
+### Query & Search
+- `POST /rag/query` - Ask a question (RAG)
+- `POST /rag/vector-search` - Raw vector search (no LLM)
+
+### Monitoring
+- `GET /rag/tasks/{id}/status` - Check job status
+- `GET /rag/status` - System health check
+
+## Usage Examples
+
+### Asking a Question
+
+```python
+response = await client.post("/rag/query", json={
+    "query": "What are the safety protocols?",
+    "conversation_id": "chat_123",
+    "use_llm": True
+})
+print(response.json()["answer"])
+```
+
+### Batch Upload
+
+```python
+await client.post("/rag/batch/process", json={
+    "document_ids": ["doc_1", "doc_2", "doc_3"],
+    "priority": 10
+})
+```
+
+## Module Attributes
+
+Attributes:
+    router (APIRouter): FastAPI router with `/rag` prefix
+    _rag_system (RAGSystem): Lazy-loaded singleton instance
 """
 
 from datetime import datetime
@@ -223,24 +277,40 @@ async def upload_document(
 ):
     """
     Upload and process a document with optional async processing via Celery.
-    
-    **Features:**
-    - Synchronous processing for immediate results
-    - Asynchronous processing via Celery for large documents
-    - Progress tracking with task IDs
-    - Automatic chunking and indexing
-    
-    **Example Usage:**
-    ```bash
-    curl -X POST "/api/rag/documents/upload" \\
-      -H "Authorization: Bearer YOUR_TOKEN" \\
-      -H "Content-Type: application/json" \\
-      -d '{
-        "content": "Document text content...",
-        "filename": "example.txt",
-        "process_async": true
-      }'
-    ```
+
+    Handles the ingestion of text content into the RAG system. Supports both synchronous processing
+    for immediate feedback and asynchronous processing for larger payloads to ensure system responsiveness.
+
+    **Processing Modes:**
+    - **Synchronous (`process_async=False`)**:
+        - Processes document immediately in the request thread
+        - Returns fully processed result with chunks
+        - Best for small text snippets (< 50KB)
+    - **Asynchronous (`process_async=True`)**:
+        - Offloads processing to Celery worker queue
+        - Returns a `task_id` for status tracking
+        - Best for large documents or high-concurrency scenarios
+
+    **Key Features:**
+    - Automatic text chunking and vector embedding
+    - Metadata extraction and indexing
+    - Tenant isolation support
+    - Progress tracking for async tasks
+
+    Args:
+        request: `DocumentUploadRequest` containing content and metadata.
+        current_user: The authenticated user.
+        rag_system: The `RAGSystem` instance (lazy loaded).
+
+    Returns:
+        `DocumentUploadResponse` containing:
+        - `document_id`: Unique identifier
+        - `status`: `completed` or `processing`
+        - `task_id`: Celery task ID (if async)
+        - `chunks_created`: Number of vector chunks (if sync)
+
+    Raises:
+        HTTPException: **500** if upload or processing fails.
     """
     try:
         start_time = time.time()
@@ -365,17 +435,36 @@ async def upload_file(
 ):
     """
     Upload a file for RAG processing via multipart/form-data.
-    
-    This endpoint accepts file uploads and converts them for processing.
-    It's designed to work with web forms and Streamlit file uploaders.
-    
-    **Example Usage (curl):**
-    ```bash
-    curl -X POST "/rag/upload" \\
-      -H "Authorization: Bearer YOUR_TOKEN" \\
-      -F "file=@document.pdf" \\
-      -F "async_processing=true"
-    ```
+
+    Designed for direct file uploads from frontend applications (e.g., React, Streamlit).
+    Automatically extracts text content from various file formats before processing.
+
+    **Supported Formats:**
+    - **Documents**: PDF, DOCX, TXT, MD, RTF
+    - **Presentations**: PPTX
+    - **Images**: JPG, PNG (via OCR if enabled)
+
+    **Workflow:**
+    1. Receives binary file stream
+    2. Extracts text content based on MIME type
+    3. Creates document record with metadata
+    4. Triggers RAG processing (chunking + embedding)
+
+    **Async Processing:**
+    - Defaults to `True` for file uploads to prevent timeouts on large files
+    - Returns `task_id` for polling status
+
+    Args:
+        file: The uploaded file object (`UploadFile`).
+        async_processing: Whether to use background processing (default: `True`).
+        current_user: The authenticated user.
+        rag_system: The `RAGSystem` instance.
+
+    Returns:
+        `DocumentUploadResponse` with document ID and processing status.
+
+    Raises:
+        HTTPException: **500** if file reading or processing fails.
     """
     try:
         start_time = time.time()
@@ -480,28 +569,40 @@ async def query_documents(
     rag_system = Depends(get_rag_system)
 ):
     """
-    Enhanced RAG query with conversation support and advanced features.
-    
+    Enhanced RAG query with conversation support and advanced retrieval features.
+
+    The core entry point for the RAG system, orchestrating retrieval, reranking, and generation.
+    Supports stateful conversations where previous context influences current answers.
+
+    **Query Strategies:**
+    - **Semantic**: Vector similarity search (dense retrieval)
+    - **Keyword**: BM25/Sparse retrieval for exact matches
+    - **Hybrid**: Weighted combination of Semantic and Keyword (Reciprocal Rank Fusion)
+
     **Features:**
-    - Natural language queries with context
-    - Conversation memory integration
-    - Multiple query types (semantic, keyword, hybrid)
-    - AI-powered answer generation
-    - Real-time processing (not via Celery for responsiveness)
-    
-    **Example Usage:**
-    ```bash
-    curl -X POST "/api/rag/query" \\
-      -H "Authorization: Bearer YOUR_TOKEN" \\
-      -H "Content-Type: application/json" \\
-      -d '{
-        "query": "What are the key features of machine learning?",
-        "use_llm": true,
-        "query_type": "semantic",
-        "conversation_id": "conv_123",
-        "max_results": 5
-      }'
-    ```
+    - **Conversation Memory**: Maintains context across multiple turns (`conversation_id`)
+    - **LLM Generation**: Optional AI answer generation (`use_llm=True`)
+    - **Source Attribution**: Returns exact text chunks used to generate the answer
+    - **Metadata Filtering**: Filter search results by document metadata
+
+    **Performance:**
+    - Optimized for low-latency real-time interaction
+    - Uses caching for frequent queries
+
+    Args:
+        request: `RAGQueryRequest` with query text and configuration.
+        current_user: The authenticated user.
+        rag_system: The `RAGSystem` instance.
+
+    Returns:
+        `RAGQueryResponse` containing:
+        - `answer`: Generated AI response
+        - `chunks`: Retrieved context chunks
+        - `sources`: Source document references
+        - `processing_time_ms`: Execution latency
+
+    Raises:
+        HTTPException: **500** if query pipeline fails.
     """
     start_time = time.time()
     
@@ -616,24 +717,35 @@ async def batch_process_documents_endpoint(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Process multiple documents in batch via Celery.
-    
-    **Perfect use case for Celery:**
-    - Long-running batch operations
-    - Progress tracking
-    - Retry logic for failed documents
-    - Queue management for high throughput
-    
-    **Example Usage:**
-    ```bash
-    curl -X POST "/api/rag/batch/process" \\
-      -H "Authorization: Bearer YOUR_TOKEN" \\
-      -H "Content-Type: application/json" \\
-      -d '{
-        "document_ids": ["doc1", "doc2", "doc3"],
-        "priority": 5
-      }'
-    ```
+    Process multiple documents in batch via Celery background workers.
+
+    Enables high-throughput ingestion of document sets without blocking the API.
+    Ideal for bulk data migration, initial knowledge base population, or nightly sync jobs.
+
+    **Mechanism:**
+    1. Accepts list of document IDs (must be pre-created or uploaded)
+    2. Validates user access to all documents
+    3. Spawns a Celery task to process documents in parallel/sequence
+    4. Returns immediately with a batch tracking ID
+
+    **Scalability:**
+    - Handles hundreds of documents per request
+    - Distributes load across available Celery workers
+    - Implements automatic retries for transient failures
+
+    Args:
+        request: `BatchProcessingRequest` with document IDs and options.
+        current_user: The authenticated user.
+
+    Returns:
+        A dictionary with:
+        - `batch_id`: Unique batch identifier
+        - `task_id`: Celery task ID
+        - `status`: `queued`
+        - `estimated_time`: Rough completion estimate in seconds
+
+    Raises:
+        HTTPException: **500** if batch submission fails.
     """
     try:
         user_id = str(current_user["_id"])
@@ -696,19 +808,30 @@ async def get_task_status_endpoint(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Get status of a Celery task with comprehensive information.
-    
-    **Returns:**
-    - Task status (pending, started, success, failure, etc.)
-    - Progress information for long-running tasks
-    - Results when completed
-    - Error details if failed
-    
-    **Example Usage:**
-    ```bash
-    curl -X GET "/api/rag/tasks/celery_task_123/status" \\
-      -H "Authorization: Bearer YOUR_TOKEN"
-    ```
+    Retrieve the real-time status and result of an asynchronous Celery task.
+
+    Provides visibility into long-running background operations such as document ingestion,
+    batch processing, or analytics generation.
+
+    **Return States:**
+    - `PENDING`: Task is waiting in the queue
+    - `STARTED`: Task is currently executing
+    - `SUCCESS`: Task completed successfully (includes result)
+    - `FAILURE`: Task failed (includes error details)
+    - `REVOKED`: Task was cancelled by user
+
+    **Progress Tracking:**
+    - For supported tasks, returns a `progress` object with percentage and current step.
+
+    Args:
+        task_id: The UUID of the Celery task.
+        current_user: The authenticated user.
+
+    Returns:
+        `TaskStatusResponse` containing status, result, error, and progress info.
+
+    Raises:
+        HTTPException: **404** if task not found, **500** if status check fails.
     """
     try:
         task_status = get_rag_task_status(task_id)
@@ -752,13 +875,28 @@ async def cancel_task_endpoint(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Cancel a running Celery task.
-    
-    **Example Usage:**
-    ```bash
-    curl -X POST "/api/rag/tasks/celery_task_123/cancel" \\
-      -H "Authorization: Bearer YOUR_TOKEN"
-    ```
+    Request cancellation of a running or queued Celery task.
+
+    Attempts to revoke the task execution. If the task is already running, it may not stop immediately
+    depending on the task's implementation and current state.
+
+    **Behavior:**
+    - **Queued Tasks**: Removed from the queue immediately.
+    - **Running Tasks**: Sent a termination signal (SIGTERM).
+
+    **Use Cases:**
+    - Stopping a large batch upload that was started by mistake
+    - Cancelling a long-running analytics report
+
+    Args:
+        task_id: The UUID of the task to cancel.
+        current_user: The authenticated user.
+
+    Returns:
+        A dictionary confirming the cancellation request.
+
+    Raises:
+        HTTPException: **400** if cancellation fails (e.g., task already completed).
     """
     try:
         success = cancel_rag_task(task_id)
@@ -802,23 +940,30 @@ async def cache_operations(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Perform cache operations via Celery for optimal performance.
-    
+    Perform administrative operations on the RAG system cache.
+
+    Manages the Redis-based caching layer to optimize retrieval performance and manage resource usage.
+    Supports warming (pre-loading) and clearing (purging) cache entries.
+
     **Operations:**
-    - `warm`: Pre-populate cache with popular queries
-    - `clear`: Clear expired or all cache entries
-    - `status`: Get cache performance statistics
-    
-    **Example Usage:**
-    ```bash
-    curl -X POST "/api/rag/cache/operations" \\
-      -H "Authorization: Bearer YOUR_TOKEN" \\
-      -H "Content-Type: application/json" \\
-      -d '{
-        "operation": "warm",
-        "cache_type": "query_result"
-      }'
-    ```
+    - **`warm`**: Pre-loads frequently accessed data or specific queries into the cache.
+      - *Parameters*: `cache_levels` (list of levels to warm)
+    - **`clear`**: Removes entries from the cache.
+      - *Parameters*: `max_age_days` (clear entries older than X days)
+    - **`status`**: Returns current cache statistics (hit rate, size, memory usage).
+
+    **Access Control:**
+    - Typically restricted to admin users (enforced via `current_user` check in production).
+
+    Args:
+        request: `CacheOperationRequest` specifying the operation and parameters.
+        current_user: The authenticated user.
+
+    Returns:
+        A dictionary with the operation status, task ID (for async ops), or result (for sync ops).
+
+    Raises:
+        HTTPException: **400** for invalid operations, **500** for execution errors.
     """
     try:
         user_id = str(current_user["_id"])
@@ -911,23 +1056,28 @@ async def generate_analytics(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Generate comprehensive analytics reports via Celery.
-    
+    Trigger the generation of comprehensive analytics reports via Celery.
+
+    Generates detailed insights into RAG system usage, performance, and health over a specified time period.
+    Reports are generated asynchronously to handle large datasets.
+
     **Report Types:**
-    - `usage`: User activity and query patterns
-    - `performance`: System performance metrics
-    - `system`: Overall system health and statistics
-    
-    **Example Usage:**
-    ```bash
-    curl -X POST "/api/rag/analytics/generate" \\
-      -H "Authorization: Bearer YOUR_TOKEN" \\
-      -H "Content-Type: application/json" \\
-      -d '{
-        "report_type": "usage",
-        "time_period_hours": 24
-      }'
-    ```
+    - **`usage`**: User activity, query volume, most accessed documents.
+    - **`performance`**: Latency metrics (P50, P95, P99), cache hit rates, error rates.
+    - **`system`**: Resource utilization (CPU, memory), index health, worker status.
+
+    **Output:**
+    - The task result will contain the generated report data or a link to a stored report file.
+
+    Args:
+        request: `AnalyticsRequest` specifying report type and time period.
+        current_user: The authenticated user.
+
+    Returns:
+        A dictionary with `report_id`, `task_id`, and status.
+
+    Raises:
+        HTTPException: **500** if report generation fails to start.
     """
     try:
         user_id = str(current_user["_id"])
@@ -983,28 +1133,32 @@ async def vector_search(
     rag_system = Depends(get_rag_system)
 ):
     """
-    Perform vector search without AI generation.
-    
-    This endpoint provides direct access to the vector search functionality,
-    returning relevant document chunks without LLM processing.
-    
+    Perform a direct vector search on the indexed documents, bypassing AI generation.
+
+    Retrieves the most semantically similar document chunks to the query.
+    Useful for building custom RAG pipelines or simply finding relevant information.
+
+    **Search Parameters:**
+    - **`query`**: The search text.
+    - **`max_results`**: Number of chunks to return (Top-K).
+    - **`similarity_threshold`**: Minimum cosine similarity score (0.0 - 1.0).
+    - **`metadata_filter`**: Optional dictionary to filter results by metadata fields.
+
     **Use Cases:**
-    - Fast document discovery
-    - Semantic search
-    - Finding similar content
-    - Building custom workflows
-    
-    **Example Usage:**
-    ```bash
-    curl -X POST "/api/rag/search" \\
-      -H "Authorization: Bearer YOUR_JWT_TOKEN" \\
-      -H "Content-Type: application/json" \\
-      -d '{
-        "query": "neural networks",
-        "max_results": 10,
-        "similarity_threshold": 0.6
-      }'
-    ```
+    - **Exploratory Search**: Find documents related to a topic.
+    - **Context Retrieval**: Fetch context for client-side processing.
+    - **Debugging**: Verify what the vector store returns for a given query.
+
+    Args:
+        request: `VectorSearchRequest` with query and filters.
+        current_user: The authenticated user.
+        rag_system: The `RAGSystem` instance.
+
+    Returns:
+        `RAGQueryResponse` containing retrieved chunks and scores (answer field is None).
+
+    Raises:
+        HTTPException: **500** if vector search fails.
     """
     try:
         user_id = str(current_user["_id"])
@@ -1061,19 +1215,30 @@ async def optimize_conversation_memory_endpoint(
     strategy: str = Query("adaptive", description="Optimization strategy")
 ):
     """
-    Optimize conversation memory storage via Celery background task.
-    
-    **Strategies:**
-    - `adaptive`: Automatically choose best optimization approach
-    - `sliding_window`: Keep only recent conversation turns
-    - `summarization`: Compress old conversations into summaries
-    - `hierarchical`: Organize conversations by importance
-    
-    **Example Usage:**
-    ```bash
-    curl -X POST "/api/rag/memory/optimize?strategy=adaptive" \\
-      -H "Authorization: Bearer YOUR_TOKEN"
-    ```
+    Trigger a background task to optimize conversation memory storage.
+
+    Manages the long-term storage of conversation history to balance context retention with
+    token usage and storage costs.
+
+    **Optimization Strategies:**
+    - **`adaptive`**: Automatically selects the best strategy based on conversation length and age.
+    - **`sliding_window`**: Truncates history to the last N turns.
+    - **`summarization`**: Replaces older turns with an AI-generated summary.
+    - **`hierarchical`**: Organizes history into topic-based clusters.
+
+    **Use Case:**
+    - Periodic maintenance job to keep the system performant.
+    - Triggered after very long conversations to reduce context window pressure.
+
+    Args:
+        current_user: The authenticated user.
+        strategy: Optimization strategy name (default: `adaptive`).
+
+    Returns:
+        A dictionary with the task ID and status.
+
+    Raises:
+        HTTPException: **500** if optimization task fails to start.
     """
     try:
         user_id = str(current_user["_id"])
@@ -1126,20 +1291,31 @@ async def get_rag_status(
     rag_system = Depends(get_rag_system)
 ):
     """
-    Get comprehensive RAG system status including Celery workers.
-    
-    **Enhanced Status Information:**
-    - RAG system components health
-    - Celery worker status and queues
-    - Document statistics
-    - Performance metrics
-    - Cache status
-    
-    **Example Usage:**
-    ```bash
-    curl -X GET "/api/rag/status" \\
-      -H "Authorization: Bearer YOUR_TOKEN"
-    ```
+    Get a comprehensive, real-time overview of the RAG system's health and operational status.
+
+    Aggregates status information from all sub-components including the vector database,
+    LLM service, document processor, and background worker queues.
+
+    **Status Details:**
+    - **System Status**: Overall health (`healthy`, `degraded`, `unhealthy`).
+    - **Components**: Individual status of Qdrant, Ollama, Redis, etc.
+    - **Celery Workers**: Number of active workers and queue depths.
+    - **Statistics**: Total indexed documents and cache performance metrics.
+
+    **Use Cases:**
+    - **Monitoring Dashboards**: Display real-time system health.
+    - **Automated Alerts**: Trigger alerts if critical components fail.
+    - **Debugging**: Quickly identify which part of the pipeline is down.
+
+    Args:
+        current_user: The authenticated user.
+        rag_system: The `RAGSystem` instance.
+
+    Returns:
+        `RAGStatusResponse` with detailed system metrics and status flags.
+
+    Raises:
+        HTTPException: **500** if status check fails.
     """
     try:
         user_id = str(current_user["_id"])
@@ -1229,22 +1405,30 @@ async def list_indexed_documents(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    List documents available for RAG queries.
-    
-    **Parameters:**
-    - `limit`: Maximum number of documents to return (1-100)
-    - `offset`: Number of documents to skip for pagination
-    
-    **Returns:**
-    - List of documents with metadata
-    - Total count
+    Retrieve a paginated list of the user's indexed documents.
+
+    Returns metadata for documents that have been successfully processed and indexed
+    in the RAG system.
+
+    **Response Includes:**
+    - Document ID and filename
+    - Upload timestamp
     - Processing status
-    
-    **Example Usage:**
-    ```bash
-    curl -X GET "/api/rag/documents?limit=10&offset=0" \\
-      -H "Authorization: Bearer YOUR_TOKEN"
-    ```
+    - Metadata (page count, file size, etc.)
+
+    **Pagination:**
+    - Efficiently handles large document libraries using `limit` and `offset`.
+
+    Args:
+        limit: Maximum number of documents to return (default: 20).
+        offset: Number of documents to skip (default: 0).
+        current_user: The authenticated user.
+
+    Returns:
+        A dictionary containing the list of `documents`, `total` count, and pagination info.
+
+    Raises:
+        HTTPException: **500** if database query fails.
     """
     try:
         user_id = str(current_user["_id"])
@@ -1287,10 +1471,20 @@ This endpoint is primarily intended for use by monitoring systems and load balan
 )
 async def rag_health_check():
     """
-    Simple health check for the RAG system.
-    
-    Returns basic system health without requiring authentication.
-    Useful for monitoring and load balancer health checks.
+    Perform a lightweight health check for the RAG service.
+
+    Provides a quick status verification for load balancers and container orchestrators (e.g., Kubernetes).
+    Does not check deep dependencies to ensure fast response times.
+
+    **Checks:**
+    - Service reachability
+    - Basic component initialization
+
+    **Access:**
+    - Public endpoint (no authentication required).
+
+    Returns:
+        A dictionary with `status`, `service` name, and `timestamp`.
     """
     try:
         # Basic health check
@@ -1328,19 +1522,26 @@ async def delete_document(
     rag_system = Depends(get_rag_system)
 ):
     """
-    Delete a document and its associated vectors.
-    
-    **Parameters:**
-    - `document_id`: ID of the document to delete
-    
-    **Returns:**
-    - Deletion confirmation with cleanup details
-    
-    **Example Usage:**
-    ```bash
-    curl -X DELETE "/api/rag/documents/doc123" \\
-      -H "Authorization: Bearer YOUR_TOKEN"
-    ```
+    Permanently delete a document and its associated vector embeddings.
+
+    Removes the document record from the database and deletes all corresponding chunks
+    from the vector store (Qdrant). This action is irreversible.
+
+    **Cleanup Process:**
+    1. Removes document metadata from MongoDB.
+    2. Deletes vector points from Qdrant collection.
+    3. Schedules a background cleanup task to remove any orphaned data or cache entries.
+
+    Args:
+        document_id: The UUID of the document to delete.
+        current_user: The authenticated user.
+        rag_system: The `RAGSystem` instance.
+
+    Returns:
+        A dictionary confirming deletion and the ID of the cleanup task.
+
+    Raises:
+        HTTPException: **404** if document not found, **500** if deletion fails.
     """
     try:
         user_id = str(current_user["_id"])
@@ -1394,20 +1595,28 @@ async def reindex_document(
     force: bool = Query(False, description="Force reindexing even if up to date")
 ):
     """
-    Reindex a specific document in the vector store.
-    
-    **Parameters:**
-    - `document_id`: ID of the document to reindex
-    - `force`: Force reindexing even if document appears up to date
-    
-    **Returns:**
-    - Reindexing task information
-    
-    **Example Usage:**
-    ```bash
-    curl -X POST "/api/rag/documents/doc123/reindex?force=true" \\
-      -H "Authorization: Bearer YOUR_TOKEN"
-    ```
+    Trigger an asynchronous reindexing of a specific document.
+
+    Regenerates vector embeddings for an existing document. Useful when:
+    - The embedding model has been updated.
+    - The chunking strategy has changed.
+    - The document content was modified externally.
+    - Index corruption is suspected.
+
+    **Behavior:**
+    - **Standard**: Checks if reindexing is needed based on version/timestamp.
+    - **Forced (`force=True`)**: Ignores checks and overwrites existing embeddings.
+
+    Args:
+        document_id: The UUID of the document.
+        current_user: The authenticated user.
+        force: Boolean flag to force reindexing (default: `False`).
+
+    Returns:
+        A dictionary with the reindexing task ID and status.
+
+    Raises:
+        HTTPException: **500** if task submission fails.
     """
     try:
         user_id = str(current_user["_id"])
@@ -1446,10 +1655,19 @@ This endpoint makes it easier for developers to integrate the API into their app
 )
 async def get_usage_examples():
     """
-    Get example API calls and usage patterns.
-    
-    Returns practical examples of how to use the RAG API endpoints
-    with different programming languages and tools.
+    Retrieve practical code examples for using the RAG API.
+
+    Returns a collection of copy-paste ready code snippets in various languages
+    (cURL, Python, JavaScript) demonstrating common usage patterns.
+
+    **Included Examples:**
+    - **Basic RAG Query**: How to ask questions and get AI answers.
+    - **Vector Search**: Performing semantic search without generation.
+    - **File Upload**: Uploading documents via multipart/form-data.
+    - **Async Status**: Polling for task completion.
+
+    Returns:
+        A dictionary containing code snippets and endpoint descriptions.
     """
     examples = {
         "curl_examples": {

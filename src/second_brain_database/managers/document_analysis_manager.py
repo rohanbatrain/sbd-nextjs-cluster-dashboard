@@ -24,7 +24,43 @@ logger = get_logger(prefix="[DocumentAnalysisManager]")
 
 
 class DocumentAnalysisManager:
-    """Professional manager for document analysis operations."""
+    """
+    Professional document analysis manager for OCR, layout, and quality assessment.
+
+    Provides comprehensive document analysis capabilities including OCR confidence scoring,
+    layout analysis, quality assessment, and document complexity analysis.
+
+    **Core Features:**
+    - **OCR confidence scoring**: Assess OCR quality and artifacts
+    - **Layout analysis**: Basic, detailed, and comprehensive layout detection
+    - **Quality assessment**: OCR, content integrity, structure, readability
+    - **Element extraction**: Headings, lists, code blocks, paragraphs
+    - **Relationship analysis**: Element hierarchy and associations
+
+    **Analysis Depths:**
+    - **Basic**: Page count, tables, images, content length, reading time
+    - **Detailed**: Line count, headings, lists, code blocks, links
+    - **Comprehensive**: Paragraphs, sentences, words, complexity score
+
+    **Quality Metrics:**
+    - **OCR confidence**: Artifact detection and OCR quality (0.0-1.0)
+    - **Content integrity**: Truncation, encoding issues, empty pages
+    - **Structure quality**: Tables, headings, lists presence
+    - **Readability score**: Sentence length and complexity
+    - **Overall score**: Weighted average of all metrics
+
+    **Layout Elements:**
+    - Headings (with hierarchy levels)
+    - Lists (bulleted, numbered)
+    - Code blocks (with language detection)
+    - Paragraphs
+    - Element relationships and hierarchy
+
+    **Integration:**
+    - Docling integration for advanced OCR
+    - Database storage for analysis results
+    - Configurable analysis parameters
+    """
 
     def __init__(self):
         """Initialize the document analysis manager."""

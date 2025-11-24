@@ -1,3 +1,66 @@
+"""
+# SBD Token Routes
+
+This module manages the **SBD Token Economy**, a virtual currency system within the Second Brain Database.
+It handles token balances, peer-to-peer transfers, transaction history, and integration with the Family system.
+
+## Domain Overview
+
+SBD Tokens serve as a utility currency for various platform features. The system supports:
+- **Personal Accounts**: Individual user token wallets.
+- **Family Accounts**: Shared virtual accounts with spending permissions and limits.
+- **Transactions**: Atomic transfers between users with audit trails.
+
+## Key Features
+
+### 1. Token Operations
+- **Balance Check**: Retrieve current token balance.
+- **Transfers**: Send tokens to other users (P2P).
+- **History**: View paginated transaction history.
+- **Annotations**: Add personal notes to past transactions.
+
+### 2. Family Integration
+- **Virtual Spending**: Users can spend from a Family account if authorized.
+- **Permission Checks**: Enforces spending limits and "can_spend" flags.
+- **Audit Trail**: Enhanced logging for family transactions, linking them to the specific family member.
+
+### 3. Transaction Safety
+- **Atomicity**: Uses MongoDB multi-document transactions (on replica sets) to ensure consistency.
+- **Race Condition Protection**: Atomic `$inc` operations and checks to prevent double-spending.
+- **Validation**: Prevents transfers to reserved accounts (e.g., `team_`).
+
+## API Endpoints
+
+- `GET /sbd_tokens` - Get current balance
+- `POST /sbd_tokens/send` - Send tokens to another user
+- `GET /sbd_tokens/transactions` - Get transaction history
+- `PATCH /sbd_tokens/transaction/note` - Add a note to a transaction
+
+## Usage Examples
+
+### Sending Tokens
+
+```python
+response = await client.post("/sbd_tokens/send", json={
+    "to_user": "alice",
+    "amount": 50,
+    "note": "Thanks for the help!"
+})
+print(f"Transaction ID: {response.json()['transaction_id']}")
+```
+
+### Checking Family Spending (Internal Logic)
+When `send_sbd_tokens` is called by a user with a `family_` prefix (virtual account):
+1. Checks if the sender is a valid virtual family account.
+2. Verifies the actual authenticated user has permission to spend from this family.
+3. Checks if the amount is within the user's spending limit.
+4. Logs the transaction with attribution to the actual user.
+
+## Module Attributes
+
+Attributes:
+    router (APIRouter): FastAPI router for token operations
+"""
 from datetime import datetime, timezone
 from uuid import uuid4
 

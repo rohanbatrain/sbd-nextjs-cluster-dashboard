@@ -29,7 +29,27 @@ logger = get_logger(prefix="[Tenant Manager]")
 
 
 class TenantManager:
-    """Manager for tenant operations and multi-tenancy."""
+    """
+    Manages multi-tenancy operations including tenant lifecycle and memberships.
+
+    Provides complete tenant management for SaaS multi-tenancy:
+    - **Tenant creation**: With plan-based resource limits
+    - **Membership management**: Invite, remove, and manage user roles
+    - **Tenant switching**: Allow users to switch between tenants
+    - **Resource limits**: Enforce plan-based quotas (users, storage, features)
+    - **Billing integration**: Track subscription and billing periods
+
+    **Supported Plans:**
+    - **Free**: Limited users, basic features
+    - **Pro**: More users, advanced features (blog, families)
+    - **Enterprise**: Unlimited users, all features (IPAM, custom domain)
+
+    **Roles:**
+    - **Owner**: Full control, billing access
+    - **Admin**: User management, audit logs
+    - **Member**: Standard access
+    - **Viewer**: Read-only access
+    """
 
     def __init__(self):
         """Initialize the TenantManager."""

@@ -1,20 +1,56 @@
 """
-IPAM REST API Routes.
+# IPAM Routes
 
-This module provides comprehensive REST API endpoints for hierarchical IP allocation
-management following the 10.X.Y.Z private IPv4 address space structure.
+This module provides the **REST API endpoints** for the IP Address Management System.
+It implements the hierarchical logic for managing the **10.X.Y.Z** private address space.
 
-Endpoints are organized into logical groups:
-- Country and mapping endpoints
-- Region management endpoints
-- Host management endpoints
-- IP interpretation endpoints
-- Statistics and analytics endpoints
-- Search endpoints
-- Import/export endpoints
-- Audit history endpoints
-- Admin quota management endpoints
-- Health check endpoint
+## Domain Overview
+
+The IPAM system is structured around a strict hierarchy:
+1.  **Country (X-Octet)**: Top-level geographical division.
+2.  **Region (Y-Octet)**: /24 Subnets allocated within a country.
+3.  **Host (Z-Octet)**: Individual IP addresses within a region.
+
+## Key Features
+
+### 1. Hierarchical Allocation
+- **Countries**: List and inspect available X-ranges.
+- **Regions**: Allocate /24 blocks (10.X.Y.0/24).
+- **Hosts**: Assign specific IPs (10.X.Y.Z) to devices.
+
+### 2. Advanced Management
+- **Reservations**: Hold resources before full allocation.
+- **Sharing**: Generate secure links to share resource details.
+- **Bulk Operations**: Tag or update multiple resources at once.
+
+### 3. Analytics & Monitoring
+- **Utilization**: Real-time capacity tracking per country/region.
+- **Forecasting**: Predict exhaustion dates based on usage trends.
+- **Webhooks**: Event-driven notifications for external systems.
+
+## API Endpoints
+
+### Core Resources
+- `GET /ipam/countries` - List countries
+- `POST /ipam/regions` - Allocate region
+- `GET /ipam/regions` - List regions
+- `POST /ipam/hosts` - Allocate host
+
+### Advanced Features
+- `POST /ipam/reservations` - Create reservation
+- `POST /ipam/shares` - Create share link
+- `POST /ipam/bulk/tags` - Bulk tag update
+
+## Usage Example
+
+### Allocating a Region
+
+```python
+await client.post("/ipam/regions", params={
+    "country": "India",
+    "region_name": "Mumbai-DC1"
+})
+```
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -116,9 +152,25 @@ router = APIRouter(
 )
 async def health_check():
     """
-    Health check endpoint for IPAM system.
-    
-    Verifies all critical dependencies are operational.
+    Perform a comprehensive health check of the IPAM system and its dependencies.
+
+    Verifies the operational status of all critical components required for IP address management,
+    including database connectivity and cache availability.
+
+    **Checks Performed:**
+    - **MongoDB**: Verifies read/write access to the IPAM collections.
+    - **Redis**: Checks connection for rate limiting and caching.
+    - **Mappings**: Ensures continent-country mapping data is loaded and accessible.
+
+    **Return Codes:**
+    - **200 OK**: All systems operational.
+    - **503 Service Unavailable**: One or more critical dependencies failed.
+
+    Returns:
+        A dictionary containing the overall `status` and individual check results.
+
+    Raises:
+        HTTPException: **503** if the system is unhealthy.
     """
     try:
         # TODO: Implement actual health checks
@@ -190,7 +242,29 @@ async def list_countries(
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
     """
-    List all countries with optional continent filter.
+    Retrieve a list of all supported countries with their IPAM configuration.
+
+    Returns the static mapping of countries to their assigned "X-octet" ranges within the
+    10.X.Y.Z private address space. This serves as the root of the IPAM hierarchy.
+
+    **Features:**
+    - **Filtering**: Filter by continent (e.g., "Asia", "Europe").
+    - **Enrichment**: Response includes the number of regions allocated by the current user in each country.
+    - **Utilization**: Calculates the percentage of assigned address space used.
+
+    **Rate Limiting:**
+    - 500 requests per hour per user.
+
+    Args:
+        request: The FastAPI request object.
+        continent: Optional filter to return countries only from a specific continent.
+        current_user: The authenticated user (requires `ipam:read` permission).
+
+    Returns:
+        A list of country objects with metadata and utilization stats.
+
+    Raises:
+        HTTPException: **500** if the country list cannot be retrieved.
     """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
@@ -272,7 +346,27 @@ async def get_country(
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
     """
-    Get details for a specific country.
+    Retrieve detailed configuration and statistics for a specific country.
+
+    Provides the IPAM parameters (X-octet range) and current usage statistics for a single country.
+    Useful for validating availability before attempting to create a new region.
+
+    **Data Points:**
+    - **Continent**: The geographical continent.
+    - **X-Range**: The start and end values for the second octet (10.X...).
+    - **Capacity**: Total number of /24 blocks available.
+    - **Allocated**: Number of regions currently allocated by the user.
+
+    Args:
+        request: The FastAPI request object.
+        country: The name of the country (case-insensitive).
+        current_user: The authenticated user (requires `ipam:read` permission).
+
+    Returns:
+        Detailed country object with utilization metrics.
+
+    Raises:
+        HTTPException: **404** if country not found, **500** for server errors.
     """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
@@ -366,7 +460,30 @@ async def get_country_utilization(
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
     """
-    Get utilization statistics for a country.
+    Calculate and retrieve detailed utilization statistics for a country.
+
+    Performs a real-time analysis of the user's IP address usage within a specific country.
+    This includes a breakdown of allocated vs. available /24 blocks.
+
+    **Metrics:**
+    - **Total Capacity**: Maximum possible regions in the country's X-range.
+    - **Allocated**: Number of regions currently owned by the user.
+    - **Utilization %**: Percentage of capacity used.
+    - **Breakdown**: Detailed usage per X-octet.
+
+    **Caching:**
+    - Results are cached for 5 minutes to reduce database load.
+
+    Args:
+        request: The FastAPI request object.
+        country: The name of the country.
+        current_user: The authenticated user (requires `ipam:read` permission).
+
+    Returns:
+        `UtilizationResponse` object with detailed statistics.
+
+    Raises:
+        HTTPException: **500** if calculation fails.
     """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
@@ -457,7 +574,38 @@ async def create_region(
     current_user: Dict[str, Any] = Depends(require_ipam_allocate)
 ):
     """
-    Create new region with auto-allocation.
+    Allocate a new /24 region block within a country's address space.
+
+    This is the primary endpoint for provisioning new network segments. It automatically
+    finds the next available subnet (10.X.Y.0/24) within the target country's assigned range.
+
+    **Allocation Logic:**
+    1.  **Validation**: Checks if the country exists and has capacity.
+    2.  **Selection**: Finds the lowest available X and Y octets.
+    3.  **Reservation**: Atomically reserves the block to prevent race conditions.
+    4.  **Quota Check**: Verifies the user hasn't exceeded their region limit.
+
+    **Side Effects:**
+    - Creates a new document in `ipam_regions` collection.
+    - Logs the allocation in the audit trail.
+    - Sets the authenticated user as the owner.
+
+    Args:
+        request: The FastAPI request object.
+        country: Target country for allocation.
+        region_name: User-friendly name for the region (must be unique within country).
+        description: Optional text description.
+        tags: Optional JSON string of tags (e.g., `{"env": "prod"}`).
+        current_user: The authenticated user (requires `ipam:allocate` permission).
+
+    Returns:
+        The newly created region object with assigned CIDR.
+
+    Raises:
+        HTTPException:
+            - **409 Conflict**: If capacity is exhausted or name is duplicate.
+            - **429 Too Many Requests**: If user quota is exceeded.
+            - **400 Bad Request**: For validation errors.
     """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
@@ -594,7 +742,35 @@ async def list_regions(
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
     """
-    List regions with filters and pagination.
+    Retrieve a paginated list of allocated regions with advanced filtering.
+
+    Allows users to browse their allocated network segments. Supports filtering by various
+    attributes to find specific regions.
+
+    **Filters:**
+    - **Country**: Filter by country name.
+    - **Status**: Filter by operational status (e.g., 'Active', 'Maintenance').
+    - **Owner**: Filter by owner username or ID.
+    - **Tags**: (Not yet implemented in this endpoint, but planned).
+
+    **Pagination:**
+    - Standard page/page_size pagination.
+    - Returns total count and page metadata.
+
+    Args:
+        request: The FastAPI request object.
+        country: Optional country filter.
+        status_filter: Optional status filter (aliased as `status`).
+        owner: Optional owner filter.
+        page: Page number (1-based).
+        page_size: Items per page (max 100).
+        current_user: The authenticated user (requires `ipam:read` permission).
+
+    Returns:
+        Paginated response containing a list of region objects.
+
+    Raises:
+        HTTPException: **400** for invalid parameters, **500** for query errors.
     """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
@@ -677,7 +853,24 @@ async def get_region(
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
     """
-    Get details for a specific region.
+    Retrieve detailed information for a specific region by its ID.
+
+    Returns the full configuration of a region, including its CIDR, location,
+    status, and metadata.
+
+    **Access Control:**
+    - Users can only view regions they own or have been granted access to via RBAC.
+
+    Args:
+        request: The FastAPI request object.
+        region_id: The UUID of the region.
+        current_user: The authenticated user (requires `ipam:read` permission).
+
+    Returns:
+        The region object.
+
+    Raises:
+        HTTPException: **404** if region not found, **500** for server errors.
     """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
@@ -739,7 +932,33 @@ async def update_region(
     current_user: Dict[str, Any] = Depends(require_ipam_update)
 ):
     """
-    Update region metadata.
+    Update the metadata and status of an existing region.
+
+    Allows modification of non-structural attributes. The CIDR and Country cannot be changed
+    once allocated (requires migration/re-allocation).
+
+    **Modifiable Fields:**
+    - **Name**: Region name (must remain unique within country).
+    - **Description**: Text description.
+    - **Owner**: Transfer ownership to another user.
+    - **Status**: Update operational status.
+    - **Tags**: Update resource tags.
+
+    Args:
+        request: The FastAPI request object.
+        region_id: The UUID of the region to update.
+        region_name: New name.
+        description: New description.
+        owner: New owner username/ID.
+        status_update: New status (aliased as `status`).
+        tags: New tags JSON string.
+        current_user: The authenticated user (requires `ipam:update` permission).
+
+    Returns:
+        The updated region object.
+
+    Raises:
+        HTTPException: **404** if not found, **400** if update fails (e.g., duplicate name).
     """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
@@ -822,7 +1041,33 @@ async def retire_region(
     current_user: Dict[str, Any] = Depends(require_ipam_release)
 ):
     """
-    Retire region with optional cascade deletion.
+    Permanently retire a region and reclaim its address space.
+
+    This is a destructive operation that removes the region from active service.
+    The region's CIDR block becomes available for re-allocation.
+
+    **Cascade Deletion:**
+    - If `cascade=True`, all hosts allocated within this region are also retired.
+    - If `cascade=False` (default), the operation fails if active hosts exist.
+
+    **Audit:**
+    - The region record is moved to the `ipam_history` collection.
+    - A retirement reason is mandatory for audit compliance.
+
+    Args:
+        request: The FastAPI request object.
+        region_id: The UUID of the region to retire.
+        reason: Mandatory text explaining why the region is being retired.
+        cascade: Boolean flag to auto-retire child hosts.
+        current_user: The authenticated user (requires `ipam:release` permission).
+
+    Returns:
+        A dictionary containing the status, region ID, and count of retired hosts.
+
+    Raises:
+        HTTPException:
+            - **404** if region not found.
+            - **400** if active hosts exist and cascade is False.
     """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
@@ -894,7 +1139,25 @@ async def get_region_comments(
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
     """
-    Get comments for a region.
+    Retrieve the comment history for a specific region.
+
+    Returns a chronological list of user comments and system notes associated with the region.
+    Useful for tracking operational changes, incidents, or deployment notes.
+
+    **Data Model:**
+    - Comments include timestamp, author, and text content.
+    - Sorted by timestamp (newest first).
+
+    Args:
+        request: The FastAPI request object.
+        region_id: The UUID of the region.
+        current_user: The authenticated user (requires `ipam:read` permission).
+
+    Returns:
+        A dictionary containing the list of `comments` and `total` count.
+
+    Raises:
+        HTTPException: **404** if region not found, **500** for server errors.
     """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
@@ -957,7 +1220,26 @@ async def add_region_comment(
     current_user: Dict[str, Any] = Depends(require_ipam_update)
 ):
     """
-    Add comment to region.
+    Append a new comment to a region's history.
+
+    Comments are immutable once added. They are used for collaboration and audit trails.
+    System events (like creation and updates) are also logged as comments automatically.
+
+    **Constraints:**
+    - Maximum length: 2000 characters.
+    - HTML/Markdown is not rendered (stored as plain text).
+
+    Args:
+        request: The FastAPI request object.
+        region_id: The UUID of the region.
+        comment_text: The content of the comment.
+        current_user: The authenticated user (requires `ipam:update` permission).
+
+    Returns:
+        A dictionary confirming success and returning the added comment object.
+
+    Raises:
+        HTTPException: **404** if region not found, **400** if comment is invalid.
     """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
@@ -1036,7 +1318,30 @@ async def preview_next_region(
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
     """
-    Preview next available region allocation.
+    Simulate the next region allocation to preview the assigned CIDR.
+
+    Calculates the next available 10.X.Y.0/24 block for a given country without actually
+    reserving it. Useful for UI wizards to show users what they will get.
+
+    **Logic:**
+    - Scans existing allocations in the country.
+    - Finds the first gap in the X.Y sequence.
+    - Returns the predicted CIDR and octet values.
+
+    **Concurrency Note:**
+    - This is a prediction only. In high-concurrency scenarios, another user might take
+      the block before the actual creation request is made.
+
+    Args:
+        request: The FastAPI request object.
+        country: The target country.
+        current_user: The authenticated user (requires `ipam:read` permission).
+
+    Returns:
+        A dictionary with the predicted `cidr`, `x_octet`, `y_octet`, and availability status.
+
+    Raises:
+        HTTPException: **409** if no addresses are available.
     """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
@@ -1111,7 +1416,26 @@ async def get_region_utilization(
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
     """
-    Get utilization statistics for a region.
+    Calculate and retrieve detailed utilization statistics for a specific region.
+
+    Analyzes the usage of the /24 subnet (256 addresses).
+    - **Total Capacity**: 254 usable hosts (excluding network .0 and broadcast .255).
+    - **Allocated**: Number of active host records.
+    - **Available**: Remaining free IPs.
+
+    **Caching:**
+    - Results are cached for 5 minutes.
+
+    Args:
+        request: The FastAPI request object.
+        region_id: The UUID of the region.
+        current_user: The authenticated user (requires `ipam:read` permission).
+
+    Returns:
+        `UtilizationResponse` object with host-level statistics.
+
+    Raises:
+        HTTPException: **404** if region not found, **500** for calculation errors.
     """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
@@ -1193,7 +1517,41 @@ async def create_host(
     current_user: Dict[str, Any] = Depends(require_ipam_allocate)
 ):
     """
-    Create new host with auto-allocation.
+    Allocate a single host IP address within a specific region.
+
+    Assigns the next available IP (10.X.Y.Z) in the region's subnet.
+    The system manages the Z-octet (1-254) allocation automatically.
+
+    **Features:**
+    - **Auto-IP**: Finds the first free IP in the subnet.
+    - **Duplicate Check**: Ensures hostname is unique within the region.
+    - **Metadata**: Stores device type, OS, application, and other inventory data.
+
+    **Rate Limiting:**
+    - 1000 requests per hour per user (higher limit for bulk operations).
+
+    Args:
+        request: The FastAPI request object.
+        region_id: The parent region's UUID.
+        hostname: Unique hostname for the device.
+        device_type: Type of device (e.g., 'VM', 'Container').
+        os_type: Operating system.
+        application: Primary application.
+        cost_center: Billing code.
+        owner: Owner username or team ID.
+        purpose: Description of use.
+        tags: JSON tags.
+        notes: Additional notes.
+        current_user: The authenticated user (requires `ipam:allocate` permission).
+
+    Returns:
+        The newly created host object with assigned IP address.
+
+    Raises:
+        HTTPException:
+            - **409 Conflict**: If region is full or hostname exists.
+            - **429 Too Many Requests**: If quota exceeded.
+            - **400 Bad Request**: Validation errors.
     """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
@@ -1302,7 +1660,35 @@ async def batch_create_hosts(
     current_user: Dict[str, Any] = Depends(require_ipam_allocate)
 ):
     """
-    Batch create hosts with auto-allocation.
+    Bulk allocate multiple hosts in a single operation.
+
+    Efficiently provisions up to 100 hosts in a region. Useful for scaling clusters
+    or deploying identical nodes.
+
+    **Naming Convention:**
+    - Hosts are named sequentially: `{hostname_prefix}1`, `{hostname_prefix}2`, etc.
+    - If a name collision occurs, it skips to the next index.
+
+    **Atomicity:**
+    - Attempts to create all requested hosts.
+    - Returns a list of successfully created hosts and any failures.
+    - Does not roll back successful creations if some fail (partial success allowed).
+
+    Args:
+        request: The FastAPI request object.
+        region_id: The parent region's UUID.
+        count: Number of hosts to create (1-100).
+        hostname_prefix: Base name for generating hostnames.
+        device_type: Optional device type for all hosts.
+        owner: Optional owner for all hosts.
+        tags: Optional tags for all hosts.
+        current_user: The authenticated user (requires `ipam:allocate` permission).
+
+    Returns:
+        A summary dictionary with `status`, `hosts` list, and `failed` list.
+
+    Raises:
+        HTTPException: **409** if region capacity is insufficient for the requested count.
     """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
@@ -1391,7 +1777,33 @@ async def list_hosts(
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
     """
-    List hosts with filters and pagination.
+    Retrieve a paginated list of allocated hosts with advanced filtering.
+
+    The primary search interface for finding specific devices or IP addresses.
+
+    **Filters:**
+    - **Region**: Scope to a specific subnet.
+    - **Status**: Filter by operational status.
+    - **Hostname**: Partial match search.
+    - **Device Type**: Filter by inventory type.
+    - **Owner**: Filter by assigned owner.
+
+    Args:
+        request: The FastAPI request object.
+        region_id: Optional region filter.
+        status_filter: Optional status filter (aliased as `status`).
+        hostname: Optional hostname search.
+        device_type: Optional device type filter.
+        owner: Optional owner filter.
+        page: Page number.
+        page_size: Items per page.
+        current_user: The authenticated user (requires `ipam:read` permission).
+
+    Returns:
+        Paginated list of host objects.
+
+    Raises:
+        HTTPException: **500** if query fails.
     """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
@@ -1478,7 +1890,24 @@ async def get_host(
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
     """
-    Get details for a specific host.
+    Retrieve detailed configuration and status for a specific host.
+
+    Returns the full host object including its IP address, assigned region,
+    metadata (OS, device type), and current status.
+
+    **Access Control:**
+    - Users can only view hosts they own or have been granted access to.
+
+    Args:
+        request: The FastAPI request object.
+        host_id: The UUID of the host.
+        current_user: The authenticated user (requires `ipam:read` permission).
+
+    Returns:
+        The host object.
+
+    Raises:
+        HTTPException: **404** if host not found, **500** for server errors.
     """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
@@ -1532,7 +1961,24 @@ async def get_host_by_ip(
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
     """
-    Lookup host by IP address.
+    Find a host record by its IP address.
+
+    Performs a reverse lookup to find the host associated with a specific IP (10.X.Y.Z).
+    Useful for troubleshooting network issues or identifying devices from logs.
+
+    **Scope:**
+    - Searches only within the user's authorized namespace.
+
+    Args:
+        request: The FastAPI request object.
+        ip_address: The IPv4 address string.
+        current_user: The authenticated user (requires `ipam:read` permission).
+
+    Returns:
+        The host object if found.
+
+    Raises:
+        HTTPException: **404** if no host matches the IP.
     """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
@@ -1588,7 +2034,25 @@ async def bulk_lookup_hosts(
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
     """
-    Bulk lookup hosts by IP addresses.
+    Perform a bulk reverse lookup for a list of IP addresses.
+
+    Optimized endpoint for resolving multiple IPs to hostnames/metadata in a single query.
+    Useful for enriching log data or network visualization tools.
+
+    **Performance:**
+    - Uses a single database query with `$in` operator.
+    - Much faster than calling `get_host_by_ip` in a loop.
+
+    Args:
+        request: The FastAPI request object.
+        ip_addresses: List of IPv4 address strings.
+        current_user: The authenticated user (requires `ipam:read` permission).
+
+    Returns:
+        A dictionary with `results` (list of host objects or None), `found` count, and `not_found` count.
+
+    Raises:
+        HTTPException: **500** if lookup fails.
     """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
@@ -1648,7 +2112,38 @@ async def update_host(
     current_user: Dict[str, Any] = Depends(require_ipam_update)
 ):
     """
-    Update host metadata.
+    Update host metadata and inventory information.
+
+    Allows modification of non-structural attributes. The IP address and Region cannot be changed
+    (requires release and re-allocation).
+
+    **Modifiable Fields:**
+    - **Hostname**: Must remain unique within the region.
+    - **Inventory**: Device type, OS, application, cost center.
+    - **Ownership**: Transfer to another user/team.
+    - **Status**: Update operational status.
+    - **Tags/Notes**: Update metadata.
+
+    Args:
+        request: The FastAPI request object.
+        host_id: The UUID of the host.
+        hostname: New hostname.
+        device_type: New device type.
+        os_type: New OS.
+        application: New application.
+        cost_center: New cost center.
+        owner: New owner.
+        purpose: New purpose.
+        status_update: New status (aliased as `status`).
+        tags: New tags JSON string.
+        notes: New notes.
+        current_user: The authenticated user (requires `ipam:update` permission).
+
+    Returns:
+        The updated host object.
+
+    Raises:
+        HTTPException: **404** if not found, **400** if update fails (e.g., duplicate hostname).
     """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
@@ -1737,7 +2232,25 @@ async def retire_host(
     current_user: Dict[str, Any] = Depends(require_ipam_release)
 ):
     """
-    Retire host.
+    Permanently retire a host and reclaim its IP address.
+
+    Removes the host record from active service and moves it to the audit history.
+    The IP address becomes immediately available for re-allocation.
+
+    **Audit:**
+    - A retirement reason is mandatory.
+
+    Args:
+        request: The FastAPI request object.
+        host_id: The UUID of the host.
+        reason: Mandatory text explaining the retirement.
+        current_user: The authenticated user (requires `ipam:release` permission).
+
+    Returns:
+        A dictionary confirming success.
+
+    Raises:
+        HTTPException: **404** if host not found.
     """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
@@ -1801,7 +2314,26 @@ async def bulk_release_hosts(
     current_user: Dict[str, Any] = Depends(require_ipam_release)
 ):
     """
-    Bulk release hosts.
+    Bulk retire multiple hosts in a single operation.
+
+    Efficiently releases a batch of IP addresses. Useful for decommissioning clusters
+    or cleaning up temporary environments.
+
+    **Behavior:**
+    - Processes requests in parallel (or bulk operation).
+    - Returns detailed success/failure counts.
+
+    Args:
+        request: The FastAPI request object.
+        host_ids: List of host UUIDs to release.
+        reason: Mandatory reason for all releases.
+        current_user: The authenticated user (requires `ipam:release` permission).
+
+    Returns:
+        A summary dictionary with counts and individual results.
+
+    Raises:
+        HTTPException: **400** if operation fails completely.
     """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
@@ -1861,7 +2393,22 @@ async def add_host_comment(
     current_user: Dict[str, Any] = Depends(require_ipam_update)
 ):
     """
-    Add comment to host.
+    Append a new comment to a host's history.
+
+    Comments are immutable and used for tracking device lifecycle events,
+    maintenance notes, or incident reports.
+
+    Args:
+        request: The FastAPI request object.
+        host_id: The UUID of the host.
+        comment_text: The content of the comment.
+        current_user: The authenticated user (requires `ipam:update` permission).
+
+    Returns:
+        A dictionary confirming success and returning the added comment.
+
+    Raises:
+        HTTPException: **404** if host not found.
     """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
@@ -1939,7 +2486,25 @@ async def preview_next_host(
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
     """
-    Preview next available host allocation.
+    Simulate the next host allocation to preview the assigned IP.
+
+    Calculates the next available Z octet (1-254) for a given region.
+    Useful for UI feedback before provisioning.
+
+    **Logic:**
+    - Scans existing hosts in the region.
+    - Finds the first gap in the Z sequence.
+
+    Args:
+        request: The FastAPI request object.
+        region_id: The parent region ID.
+        current_user: The authenticated user (requires `ipam:read` permission).
+
+    Returns:
+        A dictionary with the predicted `next_ip`, `z_octet`, and availability status.
+
+    Raises:
+        HTTPException: **409** if subnet is full.
     """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
@@ -2037,7 +2602,31 @@ async def interpret_ip_address(
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
     """
-    Interpret IP address hierarchy.
+    Interpret any IP address in the 10.X.Y.Z format to understand its geographic hierarchy.
+
+    Decodes the IP address structure to identify its location and purpose within the global network.
+    Returns the full hierarchy from Global Root down to the specific Host.
+
+    **Hierarchy Levels:**
+    - **Global Root**: 10.0.0.0/8
+    - **Continent**: Derived from the X octet range.
+    - **Country**: Specific X octet.
+    - **Region**: Specific Y octet (subnet).
+    - **Host**: Specific Z octet.
+
+    **Access Control:**
+    - Returns 404 if the IP belongs to a subnet the user cannot access.
+
+    Args:
+        request: The FastAPI request object.
+        ip_address: The IPv4 address string (10.X.Y.Z).
+        current_user: The authenticated user (requires `ipam:read` permission).
+
+    Returns:
+        A hierarchical JSON object detailing the IP's location and status.
+
+    Raises:
+        HTTPException: **404** if IP not found or access denied.
     """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
@@ -2099,7 +2688,24 @@ async def get_continent_statistics(
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
     """
-    Get aggregated statistics for a continent.
+    Retrieve aggregated utilization statistics for a specific continent.
+
+    Provides high-level metrics on IP usage across all countries within the continent.
+    Useful for capacity planning and identifying high-growth areas.
+
+    **Caching:**
+    - Results are cached for 5 minutes to reduce database load.
+
+    Args:
+        request: The FastAPI request object.
+        continent: The name of the continent (e.g., "Asia", "Europe").
+        current_user: The authenticated user (requires `ipam:read` permission).
+
+    Returns:
+        A dictionary containing total capacity, used IPs, and utilization percentage.
+
+    Raises:
+        HTTPException: **500** if statistics calculation fails.
     """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
@@ -2144,7 +2750,21 @@ async def get_top_utilized(
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
     """
-    Get top utilized resources.
+    Identify the most heavily utilized countries and regions.
+
+    Returns a ranked list of resources sorted by utilization percentage (descending).
+    Critical for proactive capacity management and identifying potential bottlenecks.
+
+    Args:
+        request: The FastAPI request object.
+        limit: Maximum number of results to return (1-100).
+        current_user: The authenticated user (requires `ipam:read` permission).
+
+    Returns:
+        A list of resource objects with their utilization metrics.
+
+    Raises:
+        HTTPException: **500** if query fails.
     """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
@@ -2189,7 +2809,26 @@ async def get_allocation_velocity(
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
     """
-    Get allocation velocity trends.
+    Analyze the rate of new IP allocations over time.
+
+    Returns time-series data showing the number of new hosts created per day/week/month.
+    Used for trend analysis and forecasting future demand.
+
+    **Time Ranges:**
+    - `7d`: Last 7 days (daily resolution).
+    - `30d`: Last 30 days (daily resolution).
+    - `90d`: Last 90 days (weekly resolution).
+
+    Args:
+        request: The FastAPI request object.
+        time_range: The analysis period (`7d`, `30d`, `90d`).
+        current_user: The authenticated user (requires `ipam:read` permission).
+
+    Returns:
+        A list of data points `{date, count}`.
+
+    Raises:
+        HTTPException: **500** if analysis fails.
     """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
@@ -2251,7 +2890,38 @@ async def search_allocations(
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
     """
-    Search allocations with filters.
+    Search for IP allocations using advanced multi-field filtering.
+
+    The primary search engine for the IPAM system. Supports combining multiple filters
+    to narrow down results (AND logic).
+
+    **Searchable Fields:**
+    - **IP/CIDR**: Exact match or subnet containment.
+    - **Geography**: Continent, Country, Region.
+    - **Metadata**: Hostname, Owner, Tags.
+    - **Time**: Creation date range.
+
+    Args:
+        request: The FastAPI request object.
+        ip_address: IP or CIDR to search.
+        hostname: Partial hostname match.
+        region_name: Partial region name match.
+        continent: Exact continent match.
+        country: Exact country match.
+        status_filter: Status (Active, Reserved, etc.).
+        owner: Owner ID or name.
+        tags: JSON string of tags.
+        created_after: ISO date string.
+        created_before: ISO date string.
+        page: Page number.
+        page_size: Items per page.
+        current_user: The authenticated user (requires `ipam:read` permission).
+
+    Returns:
+        Paginated search results.
+
+    Raises:
+        HTTPException: **400** for invalid parameters, **500** for search errors.
     """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
@@ -2338,7 +3008,28 @@ async def create_export_job(
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
     """
-    Create export job.
+    Initiate an asynchronous background job to export IPAM data.
+
+    Generates a downloadable report of IP allocations based on provided filters.
+    Since exports can be large, this endpoint returns a Job ID immediately.
+
+    **Formats:**
+    - **CSV**: Flat format, best for spreadsheets.
+    - **JSON**: Hierarchical or flat JSON, best for programmatic use.
+
+    Args:
+        request: The FastAPI request object.
+        format: Output format (`csv` or `json`).
+        include_hierarchy: If true, includes full hierarchy data in JSON.
+        country: Optional filter by country.
+        status_filter: Optional filter by status.
+        current_user: The authenticated user (requires `ipam:read` permission).
+
+    Returns:
+        A dictionary with `job_id` and status `accepted`.
+
+    Raises:
+        HTTPException: **400** if export initiation fails.
     """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
@@ -2399,7 +3090,21 @@ async def download_export(
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
     """
-    Download export file.
+    Get the temporary download URL for a completed export job.
+
+    Checks the status of an export job and returns a signed URL if the file is ready.
+    Download URLs are time-limited for security.
+
+    Args:
+        request: The FastAPI request object.
+        job_id: The UUID of the export job.
+        current_user: The authenticated user (requires `ipam:read` permission).
+
+    Returns:
+        A dictionary containing the `download_url`.
+
+    Raises:
+        HTTPException: **404** if job not found or not ready.
     """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
@@ -2456,7 +3161,28 @@ async def import_allocations(
     current_user: Dict[str, Any] = Depends(require_ipam_allocate)
 ):
     """
-    Import allocations.
+    Bulk import IP allocations from an external file.
+
+    Parses and processes a CSV or JSON file to create multiple host records.
+    Supports "dry run" mode via `preview` to validate data before committing.
+
+    **Modes:**
+    - `auto`: Attempts to import, skips errors if possible.
+    - `manual`: Stops on first error.
+    - `preview`: Validates only, no changes made.
+
+    Args:
+        request: The FastAPI request object.
+        file_content: Raw content of the CSV/JSON file.
+        mode: Import strategy (`auto`, `manual`, `preview`).
+        force: If true, overwrites existing records (dangerous).
+        current_user: The authenticated user (requires `ipam:allocate` permission).
+
+    Returns:
+        A summary of the import operation (success/fail counts).
+
+    Raises:
+        HTTPException: **400** if file format is invalid.
     """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
@@ -2512,7 +3238,23 @@ async def preview_import(
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
     """
-    Preview import validation.
+    Validate an import file and report potential errors without applying changes.
+
+    A safe way to test an import file. Checks for:
+    - Format validity (CSV/JSON).
+    - Required fields.
+    - Data constraints (IP conflicts, invalid regions).
+
+    Args:
+        request: The FastAPI request object.
+        file_content: Raw content of the CSV/JSON file.
+        current_user: The authenticated user (requires `ipam:read` permission).
+
+    Returns:
+        A detailed validation report with error counts and sample errors.
+
+    Raises:
+        HTTPException: **400** if validation fails critically.
     """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
@@ -2571,7 +3313,23 @@ async def get_audit(
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
     """
-    Query audit history (alias endpoint for backward compatibility).
+    Query the IPAM audit log (Alias).
+
+    Legacy alias for `/audit/history`. Redirects to the main history endpoint.
+    See `get_audit_history` for full documentation.
+
+    Args:
+        request: The FastAPI request object.
+        action_type: Filter by action.
+        resource_type: Filter by resource.
+        start_date: Start of date range.
+        end_date: End of date range.
+        page: Page number.
+        page_size: Items per page.
+        current_user: The authenticated user.
+
+    Returns:
+        Paginated audit logs.
     """
     # Delegate to the main audit history endpoint
     return await get_audit_history(
@@ -2614,7 +3372,31 @@ async def get_audit_history(
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
     """
-    Query audit history.
+    Retrieve a chronological history of all IPAM operations.
+
+    Provides a complete audit trail for compliance and security monitoring.
+    Tracks who did what, when, and to which resource.
+
+    **Filters:**
+    - **Action**: CREATE, UPDATE, DELETE, etc.
+    - **Resource**: Region, Host, Country.
+    - **Time**: Date range filtering.
+
+    Args:
+        request: The FastAPI request object.
+        action_type: Optional action filter.
+        resource_type: Optional resource type filter.
+        start_date: Optional start date (ISO).
+        end_date: Optional end date (ISO).
+        page: Page number.
+        page_size: Items per page.
+        current_user: The authenticated user (requires `ipam:read` permission).
+
+    Returns:
+        Paginated list of audit log entries.
+
+    Raises:
+        HTTPException: **500** if query fails.
     """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
@@ -2687,7 +3469,21 @@ async def get_ip_audit_history(
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
     """
-    Get audit history for specific IP.
+    Retrieve the complete audit trail for a specific IP address.
+
+    Shows the lifecycle history of an IP, including allocations, releases, and modifications.
+    Useful for forensic analysis of a specific network resource.
+
+    Args:
+        request: The FastAPI request object.
+        ip_address: The IPv4 address to investigate.
+        current_user: The authenticated user (requires `ipam:read` permission).
+
+    Returns:
+        A list of audit log entries for the specified IP.
+
+    Raises:
+        HTTPException: **500** if query fails.
     """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
@@ -2739,7 +3535,28 @@ async def export_audit_history(
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
     """
-    Export audit history.
+    Initiate an asynchronous export of the audit history log.
+
+    Generates a compliance report containing all audit events matching the filters.
+    Returns a Job ID for tracking the export status.
+
+    **Formats:**
+    - **CSV**: Standard audit log format.
+    - **JSON**: Structured event data.
+
+    Args:
+        request: The FastAPI request object.
+        format: Output format (`csv` or `json`).
+        action_type: Optional filter by action type.
+        start_date: Optional start date.
+        end_date: Optional end date.
+        current_user: The authenticated user (requires `ipam:read` permission).
+
+    Returns:
+        A dictionary with `job_id` and status `accepted`.
+
+    Raises:
+        HTTPException: **400** if export fails.
     """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
@@ -2804,7 +3621,24 @@ async def get_user_quota(
     current_user: Dict[str, Any] = Depends(require_ipam_admin)
 ):
     """
-    Get user quota (admin only).
+    Retrieve resource quotas for a specific user (Admin Only).
+
+    Displays the limits on regions, hosts, and other IPAM resources for a target user.
+    Used by administrators to monitor usage and enforce limits.
+
+    **Access Control:**
+    - Restricted to users with `ipam:admin` permission.
+
+    Args:
+        request: The FastAPI request object.
+        target_user_id: The ID of the user to inspect.
+        current_user: The authenticated user (requires `ipam:admin` permission).
+
+    Returns:
+        A dictionary containing quota limits and current usage.
+
+    Raises:
+        HTTPException: **500** if retrieval fails.
     """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
@@ -2851,7 +3685,27 @@ async def update_user_quota(
     current_user: Dict[str, Any] = Depends(require_ipam_admin)
 ):
     """
-    Update user quota (admin only).
+    Modify resource quotas for a specific user (Admin Only).
+
+    Allows administrators to increase or decrease the number of regions or hosts
+    a user is allowed to allocate.
+
+    **Quotas:**
+    - **Region Quota**: Max number of active regions.
+    - **Host Quota**: Max number of active hosts.
+
+    Args:
+        request: The FastAPI request object.
+        target_user_id: The ID of the user to update.
+        region_quota: New limit for regions (optional).
+        host_quota: New limit for hosts (optional).
+        current_user: The authenticated user (requires `ipam:admin` permission).
+
+    Returns:
+        The updated quota object.
+
+    Raises:
+        HTTPException: **400** if no updates provided.
     """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
@@ -2911,7 +3765,22 @@ async def list_user_quotas(
     current_user: Dict[str, Any] = Depends(require_ipam_admin)
 ):
     """
-    List all user quotas (admin only).
+    List all user quotas with pagination (Admin Only).
+
+    Provides a system-wide view of resource limits and usage across all users.
+    Essential for capacity planning and identifying heavy users.
+
+    Args:
+        request: The FastAPI request object.
+        page: Page number.
+        page_size: Items per page.
+        current_user: The authenticated user (requires `ipam:admin` permission).
+
+    Returns:
+        Paginated list of user quotas.
+
+    Raises:
+        HTTPException: **500** if listing fails.
     """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
@@ -2977,7 +3846,27 @@ async def create_reservation(
     reservation_request: ReservationCreateRequest,
     current_user: Dict[str, Any] = Depends(require_ipam_allocate)
 ):
-    """Create a new IP reservation."""
+    """
+    Reserve an IP address or region for future use.
+
+    Reservations prevent other users from allocating the specified resource
+    but do not activate it. Reservations automatically expire after the specified duration.
+
+    **Use Cases:**
+    - Planning a new deployment.
+    - Holding an IP for a specific service migration.
+
+    Args:
+        request: The FastAPI request object.
+        reservation_request: Pydantic model containing reservation details.
+        current_user: The authenticated user (requires `ipam:allocate` permission).
+
+    Returns:
+        The created reservation object.
+
+    Raises:
+        HTTPException: **409** if resource is already taken.
+    """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
     await check_ipam_rate_limit(user_id, "reservation_create", limit=100, period=3600)
@@ -3029,7 +3918,26 @@ async def list_reservations(
     page_size: int = Query(50, ge=1, le=100),
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
-    """List user's reservations with filtering."""
+    """
+    List active reservations with optional filtering.
+
+    Retrieves all reservations made by the current user (or all if admin).
+    Supports filtering by status (active/expired) and resource type.
+
+    Args:
+        request: The FastAPI request object.
+        status_filter: Filter by status (e.g., `active`).
+        resource_type: Filter by type (`host`, `region`).
+        page: Page number.
+        page_size: Items per page.
+        current_user: The authenticated user (requires `ipam:read` permission).
+
+    Returns:
+        Paginated list of reservations.
+
+    Raises:
+        HTTPException: **500** if listing fails.
+    """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
     await check_ipam_rate_limit(user_id, "reservation_list", limit=500, period=3600)
@@ -3068,7 +3976,20 @@ async def get_reservation(
     reservation_id: str,
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
-    """Get reservation details."""
+    """
+    Get detailed information about a specific reservation.
+
+    Args:
+        request: The FastAPI request object.
+        reservation_id: The UUID of the reservation.
+        current_user: The authenticated user (requires `ipam:read` permission).
+
+    Returns:
+        The reservation object.
+
+    Raises:
+        HTTPException: **404** if not found.
+    """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
     try:
@@ -3096,7 +4017,25 @@ async def convert_reservation(
     hostname: Optional[str] = Query(None),
     current_user: Dict[str, Any] = Depends(require_ipam_allocate)
 ):
-    """Convert reservation to actual allocation."""
+    """
+    Convert an active reservation into a live allocation.
+
+    Promotes a reserved IP or region to active status. The reservation is removed,
+    and a standard allocation record is created.
+
+    Args:
+        request: The FastAPI request object.
+        reservation_id: The UUID of the reservation.
+        region_name: Optional name for the new region (if converting region).
+        hostname: Optional hostname for the new host (if converting host).
+        current_user: The authenticated user (requires `ipam:allocate` permission).
+
+    Returns:
+        The newly created allocation object.
+
+    Raises:
+        HTTPException: **400** if conversion fails.
+    """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
     try:
@@ -3122,7 +4061,22 @@ async def delete_reservation(
     reservation_id: str,
     current_user: Dict[str, Any] = Depends(require_ipam_release)
 ):
-    """Delete a reservation."""
+    """
+    Cancel and delete a reservation.
+
+    Releases the reserved resource back to the free pool immediately.
+
+    Args:
+        request: The FastAPI request object.
+        reservation_id: The UUID of the reservation.
+        current_user: The authenticated user (requires `ipam:release` permission).
+
+    Returns:
+        Success message.
+
+    Raises:
+        HTTPException: **400** if deletion fails.
+    """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
     try:
@@ -3147,7 +4101,21 @@ async def get_preferences(
     request: Request,
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
-    """Get user's IPAM preferences."""
+    """
+    Retrieve current user's IPAM preferences.
+
+    Returns settings such as default quotas, notification preferences, and UI defaults.
+
+    Args:
+        request: The FastAPI request object.
+        current_user: The authenticated user (requires `ipam:read` permission).
+
+    Returns:
+        A dictionary of user preferences.
+
+    Raises:
+        HTTPException: **500** if retrieval fails.
+    """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
     try:
@@ -3171,7 +4139,25 @@ async def update_preferences(
     notification_enabled: Optional[bool] = Query(None),
     current_user: Dict[str, Any] = Depends(require_ipam_update)
 ):
-    """Update user's IPAM preferences."""
+    """
+    Update user's IPAM preferences.
+
+    Allows customization of default values and behavior for the IPAM interface.
+
+    Args:
+        request: The FastAPI request object.
+        default_country: Default country for new allocations.
+        default_region_quota: Default region quota.
+        default_host_quota: Default host quota.
+        notification_enabled: Enable/disable notifications.
+        current_user: The authenticated user (requires `ipam:update` permission).
+
+    Returns:
+        The updated preferences object.
+
+    Raises:
+        HTTPException: **400** if update fails.
+    """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
     try:
@@ -3204,7 +4190,24 @@ async def save_filter(
     filter_criteria: str = Query(...),
     current_user: Dict[str, Any] = Depends(require_ipam_update)
 ):
-    """Save a filter for quick access."""
+    """
+    Save a custom search filter for quick access.
+
+    Allows users to name and save complex filter combinations (e.g., "High Usage Asia Regions")
+    for one-click retrieval later.
+
+    Args:
+        request: The FastAPI request object.
+        filter_name: A unique name for the filter.
+        filter_criteria: JSON string representing the filter parameters.
+        current_user: The authenticated user (requires `ipam:update` permission).
+
+    Returns:
+        The saved filter object.
+
+    Raises:
+        HTTPException: **400** if save fails.
+    """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
     try:
@@ -3224,7 +4227,19 @@ async def get_saved_filters(
     request: Request,
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
-    """Get user's saved filters."""
+    """
+    Retrieve all saved filters for the current user.
+
+    Args:
+        request: The FastAPI request object.
+        current_user: The authenticated user (requires `ipam:read` permission).
+
+    Returns:
+        A list of saved filter objects.
+
+    Raises:
+        HTTPException: **500** if retrieval fails.
+    """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
     try:
@@ -3246,7 +4261,20 @@ async def delete_filter(
     filter_id: str,
     current_user: Dict[str, Any] = Depends(require_ipam_update)
 ):
-    """Delete a saved filter."""
+    """
+    Delete a saved filter.
+
+    Args:
+        request: The FastAPI request object.
+        filter_id: The UUID of the filter.
+        current_user: The authenticated user (requires `ipam:update` permission).
+
+    Returns:
+        Success message.
+
+    Raises:
+        HTTPException: **400** if deletion fails.
+    """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
     try:
@@ -3270,7 +4298,25 @@ async def get_dashboard_stats(
     request: Request,
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
-    """Get comprehensive dashboard statistics."""
+    """
+    Retrieve high-level dashboard statistics.
+
+    Provides a summary view for the main IPAM dashboard, including:
+    - Total regions and hosts.
+    - Overall utilization.
+    - Recent alerts.
+    - Quick status counts.
+
+    Args:
+        request: The FastAPI request object.
+        current_user: The authenticated user (requires `ipam:read` permission).
+
+    Returns:
+        A dictionary of dashboard metrics.
+
+    Raises:
+        HTTPException: **500** if calculation fails.
+    """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
     await check_ipam_rate_limit(user_id, "dashboard_stats", limit=500, period=3600)
@@ -3300,7 +4346,25 @@ async def get_forecast(
     days_ahead: int = Query(30, ge=1, le=365),
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
-    """Get capacity forecast for a resource."""
+    """
+    Predict future capacity usage for a specific resource.
+
+    Uses historical data to forecast when a region or subnet will reach capacity.
+    Essential for proactive infrastructure planning.
+
+    Args:
+        request: The FastAPI request object.
+        resource_type: Type of resource (`region`, `subnet`).
+        resource_id: The UUID of the resource.
+        days_ahead: Number of days to forecast (1-365).
+        current_user: The authenticated user (requires `ipam:read` permission).
+
+    Returns:
+        A forecast object with predicted usage curve and saturation date.
+
+    Raises:
+        HTTPException: **500** if forecasting fails.
+    """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
     try:
@@ -3321,7 +4385,22 @@ async def get_trends(
     days: int = Query(30, ge=1, le=365),
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
-    """Get allocation trends over time."""
+    """
+    Analyze historical allocation trends.
+
+    Returns trend lines for resource consumption over the specified period.
+
+    Args:
+        request: The FastAPI request object.
+        days: Number of days to analyze (1-365).
+        current_user: The authenticated user (requires `ipam:read` permission).
+
+    Returns:
+        Trend data points.
+
+    Raises:
+        HTTPException: **500** if analysis fails.
+    """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
     try:
@@ -3349,7 +4428,24 @@ async def list_notifications(
     page_size: int = Query(50, ge=1, le=100),
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
-    """List user's notifications."""
+    """
+    List user notifications with optional filtering.
+
+    Retrieves system alerts, warnings, and informational messages.
+
+    Args:
+        request: The FastAPI request object.
+        is_read: Filter by read/unread status.
+        page: Page number.
+        page_size: Items per page.
+        current_user: The authenticated user (requires `ipam:read` permission).
+
+    Returns:
+        Paginated list of notifications.
+
+    Raises:
+        HTTPException: **500** if listing fails.
+    """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
     try:
@@ -3373,7 +4469,21 @@ async def get_unread_count(
     request: Request,
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
-    """Get count of unread notifications."""
+    """
+    Get the count of unread notifications.
+
+    Used for UI badges and alerts.
+
+    Args:
+        request: The FastAPI request object.
+        current_user: The authenticated user (requires `ipam:read` permission).
+
+    Returns:
+        Dictionary with `unread_count`.
+
+    Raises:
+        HTTPException: **500** if counting fails.
+    """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
     try:
@@ -3396,7 +4506,20 @@ async def mark_notification_read(
     notification_id: str,
     current_user: Dict[str, Any] = Depends(require_ipam_update)
 ):
-    """Mark a notification as read."""
+    """
+    Mark a notification as read.
+
+    Args:
+        request: The FastAPI request object.
+        notification_id: The UUID of the notification.
+        current_user: The authenticated user (requires `ipam:update` permission).
+
+    Returns:
+        Success message.
+
+    Raises:
+        HTTPException: **400** if update fails.
+    """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
     try:
@@ -3417,7 +4540,20 @@ async def delete_notification(
     notification_id: str,
     current_user: Dict[str, Any] = Depends(require_ipam_update)
 ):
-    """Delete a notification."""
+    """
+    Delete a notification.
+
+    Args:
+        request: The FastAPI request object.
+        notification_id: The UUID of the notification.
+        current_user: The authenticated user (requires `ipam:update` permission).
+
+    Returns:
+        Success message.
+
+    Raises:
+        HTTPException: **400** if deletion fails.
+    """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
     try:
@@ -3445,7 +4581,24 @@ async def create_notification_rule(
     notification_method: str = Query("in_app"),
     current_user: Dict[str, Any] = Depends(require_ipam_update)
 ):
-    """Create a notification rule."""
+    """
+    Create a custom notification rule.
+
+    Define conditions under which the user should be alerted (e.g., "Region > 90% full").
+
+    Args:
+        request: The FastAPI request object.
+        event_type: The type of event to monitor.
+        threshold: The value that triggers the alert.
+        notification_method: Delivery method (`in_app`, `email`).
+        current_user: The authenticated user (requires `ipam:update` permission).
+
+    Returns:
+        The created rule object.
+
+    Raises:
+        HTTPException: **400** if creation fails.
+    """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
     try:
@@ -3471,7 +4624,19 @@ async def list_notification_rules(
     request: Request,
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
-    """List user's notification rules."""
+    """
+    List all notification rules configured by the user.
+
+    Args:
+        request: The FastAPI request object.
+        current_user: The authenticated user (requires `ipam:read` permission).
+
+    Returns:
+        A list of notification rules.
+
+    Raises:
+        HTTPException: **500** if listing fails.
+    """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
     try:
@@ -3500,7 +4665,22 @@ async def update_notification_rule(
     threshold: Optional[float] = Query(None),
     current_user: Dict[str, Any] = Depends(require_ipam_update)
 ):
-    """Update a notification rule."""
+    """
+    Update an existing notification rule.
+
+    Args:
+        request: The FastAPI request object.
+        rule_id: The UUID of the rule.
+        is_active: Enable/disable the rule.
+        threshold: Update the trigger threshold.
+        current_user: The authenticated user (requires `ipam:update` permission).
+
+    Returns:
+        Success message.
+
+    Raises:
+        HTTPException: **400** if update fails.
+    """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
     try:
@@ -3536,7 +4716,20 @@ async def delete_notification_rule(
     rule_id: str,
     current_user: Dict[str, Any] = Depends(require_ipam_update)
 ):
-    """Delete a notification rule."""
+    """
+    Delete a notification rule.
+
+    Args:
+        request: The FastAPI request object.
+        rule_id: The UUID of the rule.
+        current_user: The authenticated user (requires `ipam:update` permission).
+
+    Returns:
+        Success message.
+
+    Raises:
+        HTTPException: **400** if deletion fails.
+    """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
     try:
@@ -3567,7 +4760,26 @@ async def create_share(
     description: Optional[str] = Query(None),
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
-    """Create a shareable link for a resource."""
+    """
+    Generate a temporary shareable link for an IPAM resource.
+
+    Allows external or unauthenticated access to specific resource details
+    for a limited time.
+
+    Args:
+        request: The FastAPI request object.
+        resource_type: Type of resource (`host`, `region`).
+        resource_id: The UUID of the resource.
+        expires_in_days: Validity period (1-90 days).
+        description: Optional description of the share.
+        current_user: The authenticated user (requires `ipam:read` permission).
+
+    Returns:
+        The created share object containing the access token/URL.
+
+    Raises:
+        HTTPException: **400** if creation fails.
+    """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
     await check_ipam_rate_limit(user_id, "share_create", limit=100, period=3600)
@@ -3596,7 +4808,19 @@ async def list_shares(
     request: Request,
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
-    """List user's active shares."""
+    """
+    List all active shareable links created by the user.
+
+    Args:
+        request: The FastAPI request object.
+        current_user: The authenticated user (requires `ipam:read` permission).
+
+    Returns:
+        A list of active shares.
+
+    Raises:
+        HTTPException: **500** if listing fails.
+    """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
     try:
@@ -3616,7 +4840,23 @@ async def get_shared_resource(
     request: Request,
     share_token: str
 ):
-    """Access a shared resource (no authentication required)."""
+    """
+    Access a shared resource using a valid share token.
+
+    **Authentication:**
+    - No user authentication required.
+    - Validates the share token and expiration.
+
+    Args:
+        request: The FastAPI request object.
+        share_token: The unique token for the share.
+
+    Returns:
+        The shared resource details.
+
+    Raises:
+        HTTPException: **404** if token is invalid or expired.
+    """
     try:
         result = await ipam_manager.get_shared_resource(share_token)
         return result
@@ -3635,7 +4875,22 @@ async def revoke_share(
     share_id: str,
     current_user: Dict[str, Any] = Depends(require_ipam_update)
 ):
-    """Revoke a shareable link."""
+    """
+    Revoke a shareable link immediately.
+
+    Invalidates the token so it can no longer be used to access the resource.
+
+    Args:
+        request: The FastAPI request object.
+        share_id: The UUID of the share.
+        current_user: The authenticated user (requires `ipam:update` permission).
+
+    Returns:
+        Success message.
+
+    Raises:
+        HTTPException: **400** if revocation fails.
+    """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
     try:
@@ -3664,7 +4919,24 @@ async def create_webhook(
     description: Optional[str] = Query(None),
     current_user: Dict[str, Any] = Depends(require_ipam_update)
 ):
-    """Create a webhook for IPAM events."""
+    """
+    Register a new webhook for IPAM events.
+
+    External systems can subscribe to events like `allocation_created` or `capacity_warning`.
+
+    Args:
+        request: The FastAPI request object.
+        webhook_url: The destination URL for the webhook payload.
+        events: List of event types to subscribe to.
+        description: Optional description.
+        current_user: The authenticated user (requires `ipam:update` permission).
+
+    Returns:
+        The created webhook object.
+
+    Raises:
+        HTTPException: **400** if creation fails.
+    """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
     await check_ipam_rate_limit(user_id, "webhook_create", limit=10, period=3600)
@@ -3691,7 +4963,19 @@ async def list_webhooks(
     request: Request,
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
-    """List user's webhooks."""
+    """
+    List all registered webhooks.
+
+    Args:
+        request: The FastAPI request object.
+        current_user: The authenticated user (requires `ipam:read` permission).
+
+    Returns:
+        A list of webhooks.
+
+    Raises:
+        HTTPException: **500** if listing fails.
+    """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
     try:
@@ -3715,7 +4999,24 @@ async def get_webhook_deliveries(
     page_size: int = Query(50, ge=1, le=100),
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
-    """Get webhook delivery history."""
+    """
+    View the delivery history for a specific webhook.
+
+    Useful for debugging failed deliveries or verifying integration.
+
+    Args:
+        request: The FastAPI request object.
+        webhook_id: The UUID of the webhook.
+        page: Page number.
+        page_size: Items per page.
+        current_user: The authenticated user (requires `ipam:read` permission).
+
+    Returns:
+        Paginated list of delivery attempts.
+
+    Raises:
+        HTTPException: **500** if retrieval fails.
+    """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
     try:
@@ -3736,7 +5037,20 @@ async def delete_webhook(
     webhook_id: str,
     current_user: Dict[str, Any] = Depends(require_ipam_update)
 ):
-    """Delete a webhook."""
+    """
+    Delete a webhook registration.
+
+    Args:
+        request: The FastAPI request object.
+        webhook_id: The UUID of the webhook.
+        current_user: The authenticated user (requires `ipam:update` permission).
+
+    Returns:
+        Success message.
+
+    Raises:
+        HTTPException: **400** if deletion fails.
+    """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
     try:
@@ -3761,7 +5075,22 @@ async def bulk_update_tags(
     bulk_request: BulkTagUpdateRequest,
     current_user: Dict[str, Any] = Depends(require_ipam_update)
 ):
-    """Bulk update tags on resources."""
+    """
+    Perform a bulk update of tags on multiple resources.
+
+    Supports adding, removing, or setting tags for a batch of IDs.
+
+    Args:
+        request: The FastAPI request object.
+        bulk_request: Pydantic model with resource IDs and tag operations.
+        current_user: The authenticated user (requires `ipam:update` permission).
+
+    Returns:
+        A summary of the operation.
+
+    Raises:
+        HTTPException: **400** if update fails.
+    """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
     await check_ipam_rate_limit(user_id, "bulk_tags", limit=10, period=3600)
@@ -3791,7 +5120,20 @@ async def get_bulk_job_status(
     job_id: str,
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
-    """Get status of a bulk operation job."""
+    """
+    Check the status of a long-running bulk operation.
+
+    Args:
+        request: The FastAPI request object.
+        job_id: The UUID of the background job.
+        current_user: The authenticated user (requires `ipam:read` permission).
+
+    Returns:
+        The job status object.
+
+    Raises:
+        HTTPException: **404** if job not found.
+    """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
     try:
@@ -3867,7 +5209,20 @@ async def get_ipam_metrics(
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
     """
-    Get comprehensive IPAM system metrics.
+    Retrieve comprehensive IPAM system metrics.
+
+    Provides a high-level overview of system health, including request rates,
+    error counts, and capacity warnings.
+
+    Args:
+        request: The FastAPI request object.
+        current_user: The authenticated user (requires `ipam:read` permission).
+
+    Returns:
+        A metrics summary object.
+
+    Raises:
+        HTTPException: **500** if retrieval fails.
     """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
@@ -3933,7 +5288,19 @@ async def get_error_rates(
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
     """
-    Get detailed error rate information.
+    Get detailed error rate information broken down by type.
+
+    Helps identify specific failure modes (e.g., capacity exhaustion vs. validation errors).
+
+    Args:
+        request: The FastAPI request object.
+        current_user: The authenticated user (requires `ipam:read` permission).
+
+    Returns:
+        A dictionary of error counts and rates.
+
+    Raises:
+        HTTPException: **500** if retrieval fails.
     """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     
@@ -4001,7 +5368,18 @@ async def get_endpoint_metrics(
     current_user: Dict[str, Any] = Depends(require_ipam_read)
 ):
     """
-    Get metrics for a specific endpoint.
+    Get performance metrics for a specific API endpoint.
+
+    Args:
+        request: The FastAPI request object.
+        endpoint: The API path to analyze (e.g., `/ipam/regions`).
+        current_user: The authenticated user (requires `ipam:read` permission).
+
+    Returns:
+        Endpoint-specific error rates and response times.
+
+    Raises:
+        HTTPException: **500** if retrieval fails.
     """
     user_id = str(current_user.get("_id", current_user.get("username", "")))
     

@@ -1,5 +1,71 @@
 """
-Additional blog routes for autosave, versioning, SEO, and analytics.
+# Blog Advanced Features Routes
+
+This module provides **specialized API endpoints** for advanced blog functionality,
+focusing on content safety, SEO optimization, and audience analytics.
+
+## Domain Overview
+
+These endpoints extend the core blog platform with enterprise-grade features:
+- **Data Safety**: Real-time autosave and version restoration.
+- **Discoverability**: Automated SEO tools (Sitemaps, RSS).
+- **Growth**: Newsletter subscriptions and engagement tracking.
+
+## Key Features
+
+### 1. Content Safety & Versioning
+- **Autosave**: High-frequency, non-destructive saving of draft content.
+- **Version History**: Full audit trail of content changes.
+- **Restoration**: Ability to revert a post to any previous state.
+
+### 2. SEO & Discovery
+- **Sitemap.xml**: Dynamic generation of sitemaps for search engine indexing.
+- **RSS Feed**: Standard RSS 2.0 feeds for content syndication.
+- **Metadata**: Rich schema.org compatible metadata support.
+
+### 3. Analytics & Growth
+- **Event Tracking**: Privacy-focused tracking of views, shares, and bookmarks.
+- **Engagement Metrics**: Aggregated stats for content performance analysis.
+- **Newsletter**: Built-in subscription management for audience building.
+
+## API Endpoints
+
+### Versioning
+- `POST .../autosave` - Save draft state
+- `GET .../versions` - View revision history
+- `POST .../restore` - Revert to version
+
+### SEO
+- `GET .../sitemap.xml` - Search engine index
+- `GET .../rss.xml` - RSS feed
+
+### Analytics
+- `POST /blog/analytics/track` - Record user event
+- `POST .../newsletter/subscribe` - Capture lead
+
+## Usage Examples
+
+### Autosaving Content
+
+```python
+# Called by frontend editor every 30s
+await client.post(f"/blog/websites/{wid}/posts/{pid}/autosave", json={
+    "content": "<p>Draft content...</p>"
+})
+```
+
+### Restoring a Version
+
+```python
+await client.post(f"/blog/websites/{wid}/posts/{pid}/restore", json={
+    "version_id": "version_abc123"
+})
+```
+
+## Module Attributes
+
+Attributes:
+    router (APIRouter): FastAPI router for advanced blog features
 """
 
 from datetime import datetime
@@ -7,9 +73,9 @@ from typing import List
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from second_brain_database.managers.blog_auth_manager import (
-    require_website_author,
-    require_website_viewer,
+from second_brain_database.routes.blog_dependencies import (
+    require_access_author,
+    require_access_viewer,
 )
 from second_brain_database.managers.logging_manager import get_logger
 from second_brain_database.models.blog_models import (
@@ -33,12 +99,31 @@ async def autosave_post(
     website_id: str,
     post_id: str,
     request: AutoSavePostRequest,
-    current_user: dict = Depends(require_website_author),
+    current_user: dict = Depends(require_access_author),
 ):
-    """Auto-save post content (draft)."""
+    """
+    Save a temporary draft of the post content (Auto-save).
+
+    This endpoint is designed to be called frequently (e.g., every few seconds) by the
+    frontend editor to prevent data loss. It updates a separate `auto_save_content` field
+    without creating new versions or affecting the published content.
+
+    **Behavior:**
+    *   Updates `auto_save_content` and `auto_save_at`.
+    *   Does NOT create a revision history entry.
+    *   Does NOT change the `updated_at` timestamp of the main post.
+
+    Args:
+        website_id (str): The ID of the website.
+        post_id (str): The ID of the post.
+        request (AutoSavePostRequest): The content to save.
+        current_user (dict): The authenticated user.
+
+    Returns:
+        dict: Success message and timestamp.
+    """
     try:
-        if current_user.get("website_id") != website_id:
-            raise HTTPException(status_code=403, detail="Access denied to this website")
+        # Access check handled by dependency
 
         from second_brain_database.database import db_manager
 
@@ -71,12 +156,24 @@ async def autosave_post(
 async def get_post_versions(
     website_id: str,
     post_id: str,
-    current_user: dict = Depends(require_website_viewer),
+    current_user: dict = Depends(require_access_viewer),
 ):
-    """Get version history for a post."""
+    """
+    Retrieve the revision history of a post.
+
+    Returns a list of all saved versions for a post. Versions are created automatically
+    when a post is updated via the main update endpoint.
+
+    Args:
+        website_id (str): The ID of the website.
+        post_id (str): The ID of the post.
+        current_user (dict): The authenticated user.
+
+    Returns:
+        List[BlogVersion]: A list of past versions.
+    """
     try:
-        if current_user.get("website_id") != website_id:
-            raise HTTPException(status_code=403, detail="Access denied to this website")
+        # Access check handled by dependency
 
         from second_brain_database.database import db_manager
 
@@ -102,12 +199,29 @@ async def restore_post_version(
     website_id: str,
     post_id: str,
     request: RestoreVersionRequest,
-    current_user: dict = Depends(require_website_author),
+    current_user: dict = Depends(require_access_author),
 ):
-    """Restore a specific version of a post."""
+    """
+    Revert a post to a previous version.
+
+    This endpoint allows authors to undo changes by restoring content from the revision history.
+
+    **Process:**
+    1.  Locates the requested version by ID.
+    2.  Creates a *new* version backup of the *current* state (safety net).
+    3.  Overwrites the current post content with the data from the restored version.
+
+    Args:
+        website_id (str): The ID of the website.
+        post_id (str): The ID of the post.
+        request (RestoreVersionRequest): The ID of the version to restore.
+        current_user (dict): The authenticated user.
+
+    Returns:
+        dict: Success message.
+    """
     try:
-        if current_user.get("website_id") != website_id:
-            raise HTTPException(status_code=403, detail="Access denied to this website")
+        # Access check handled by dependency
 
         from second_brain_database.database import db_manager
 
@@ -171,7 +285,21 @@ async def restore_post_version(
 # SEO endpoints
 @router.get("/websites/{website_id}/sitemap.xml")
 async def get_sitemap(website_id: str):
-    """Generate sitemap.xml for a website."""
+    """
+    Generate a standard XML sitemap for the website.
+
+    This endpoint dynamically generates a sitemap listing all *published* posts.
+    It is used by search engine crawlers (Google, Bing) to index the blog.
+
+    **Format:**
+    Standard XML Sitemap Protocol 0.9.
+
+    Args:
+        website_id (str): The ID of the website.
+
+    Returns:
+        Response: XML content with `application/xml` media type (implicit in FastAPI default, but usually explicit Response is better).
+    """
     try:
         from second_brain_database.database import db_manager
 
@@ -205,7 +333,18 @@ async def get_sitemap(website_id: str):
 
 @router.get("/websites/{website_id}/rss.xml")
 async def get_rss_feed(website_id: str):
-    """Generate RSS feed for a website."""
+    """
+    Generate an RSS 2.0 feed for the website.
+
+    Allows users to subscribe to the blog using RSS readers.
+    Includes the 20 most recent *published* posts.
+
+    Args:
+        website_id (str): The ID of the website.
+
+    Returns:
+        Response: XML content.
+    """
     try:
         from second_brain_database.database import db_manager
 
@@ -258,7 +397,23 @@ async def subscribe_to_newsletter(
     website_id: str,
     request: NewsletterSubscribeRequest,
 ):
-    """Subscribe to a website's newsletter."""
+    """
+    Subscribe a user to the website's newsletter.
+
+    This is a public endpoint (no auth required) allowing visitors to sign up for updates.
+
+    **Logic:**
+    *   If the email is new: Creates a new active subscription.
+    *   If the email exists but was unsubscribed: Reactivates the subscription.
+    *   If the email exists and is active: Returns error (already subscribed).
+
+    Args:
+        website_id (str): The ID of the website.
+        request (NewsletterSubscribeRequest): Email and optional name.
+
+    Returns:
+        NewsletterSubscriberResponse: Subscription details.
+    """
     try:
         from second_brain_database.database import db_manager
 
@@ -305,7 +460,23 @@ async def track_analytics(
     request: TrackAnalyticsRequest,
     req: Request = None,
 ):
-    """Track analytics events (views, likes, shares, bookmarks)."""
+    """
+    Record a user engagement event (Analytics).
+
+    This endpoint tracks interactions such as page views, likes, shares, and bookmarks.
+    It is designed to be called by the frontend when these actions occur.
+
+    **Privacy:**
+    *   Logs IP address and User-Agent for unique visitor counting.
+    *   Does NOT require authentication (tracks anonymous visitors).
+
+    Args:
+        request (TrackAnalyticsRequest): Event type and metadata.
+        req (Request): The HTTP request object.
+
+    Returns:
+        dict: Success message.
+    """
     try:
         from second_brain_database.database import db_manager
 
@@ -349,12 +520,24 @@ async def track_analytics(
 async def get_engagement_metrics(
     website_id: str,
     post_id: str,
-    current_user: dict = Depends(require_website_viewer),
+    current_user: dict = Depends(require_access_viewer),
 ):
-    """Get engagement metrics for a post."""
+    """
+    Retrieve aggregated engagement metrics for a post.
+
+    Calculates total views, unique visitors, share counts, and other metrics
+    based on the raw analytics events logged via `/analytics/track`.
+
+    Args:
+        website_id (str): The ID of the website.
+        post_id (str): The ID of the post.
+        current_user (dict): The authenticated user.
+
+    Returns:
+        EngagementMetricsResponse: Aggregated metrics.
+    """
     try:
-        if current_user.get("website_id") != website_id:
-            raise HTTPException(status_code=403, detail="Access denied to this website")
+        # Access check handled by dependency
 
         from second_brain_database.database import db_manager
 

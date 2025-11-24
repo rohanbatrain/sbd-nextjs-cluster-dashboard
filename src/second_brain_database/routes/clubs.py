@@ -1,8 +1,82 @@
 """
-Club API routes for multi-tenant club operations.
+# University Clubs Routes
 
-This module provides RESTful API endpoints for universities, clubs, verticals,
-members, and events with university/club-level isolation and role-based access control.
+This module provides the **REST API endpoints** for the University Clubs Platform.
+It handles the lifecycle of universities, student clubs, verticals, and events.
+
+## Domain Overview
+
+The Clubs Platform is a multi-tenant system for student organizations:
+- **University**: The top-level entity (e.g., "Stanford University").
+- **Club**: A student organization within a university (e.g., "AI Club").
+- **Vertical**: A sub-department or interest group within a club (e.g., "ML Team").
+- **Member**: A user with a specific role in a club (Owner, Admin, Member).
+
+## Key Features
+
+### 1. Hierarchy & Multi-Tenancy
+- **Isolation**: Clubs are scoped to universities; Verticals are scoped to clubs.
+- **Role-Based Access Control (RBAC)**:
+    - **Owner**: Full control, can delete club.
+    - **Admin**: Can manage settings, members, and events.
+    - **Lead**: Manages specific verticals or events.
+    - **Member**: Standard access to events and discussions.
+
+### 2. Lifecycle Management
+- **Creation**: Users can request to create universities (requires approval) or clubs.
+- **Approval Workflow**: System admins approve universities; Club admins approve members.
+- **Updates**: Profile management (logo, banner, social links).
+
+### 3. Discovery & Search
+- **Filtering**: Find clubs by university, category, or tags.
+- **Search**: Full-text search on club names and descriptions.
+- **Recommendations**: "Popular" and "Recommended" lists based on engagement.
+
+## API Endpoints
+
+### Universities
+- `POST /clubs/universities` - Request creation
+- `GET /clubs/universities` - List approved
+- `POST .../approve` - Approve (Admin only)
+
+### Clubs
+- `POST /clubs` - Create club
+- `GET /clubs` - List/Filter clubs
+- `GET /clubs/{id}` - Get details
+- `PUT /clubs/{id}` - Update settings
+
+### Verticals
+- `POST /clubs/{id}/verticals` - Create vertical
+- `GET /clubs/{id}/verticals` - List verticals
+
+## Usage Examples
+
+### Creating a Club
+
+```python
+await client.post("/clubs", json={
+    "name": "Robotics Society",
+    "university_id": "uni_123",
+    "category": "Technology",
+    "description": "Building the future of automation."
+})
+```
+
+### Searching for Clubs
+
+```python
+# Find tech clubs at Stanford
+await client.get("/clubs", params={
+    "university_id": "stanford_u",
+    "category": "Technology"
+})
+```
+
+## Module Attributes
+
+Attributes:
+    router (APIRouter): FastAPI router with `/clubs` prefix
+    club_manager (ClubManager): Singleton instance for business logic
 """
 
 from datetime import datetime
@@ -72,7 +146,29 @@ async def create_university(
     request: CreateUniversityRequest,
     current_user: dict = Depends(require_club_member)  # Any authenticated user can request
 ):
-    """Request creation of a new university (admin approval required)."""
+    """
+    Request the creation of a new university entity.
+
+    This endpoint allows any authenticated user to submit a request for a new university.
+    The university is created in a `pending` state and requires approval from a system administrator
+    before it becomes active and visible to other users.
+
+    **Process:**
+    1.  Validates the university name and domain (must be unique).
+    2.  Creates the university document with `admin_approved=False`.
+    3.  Logs the request for admin review.
+
+    Args:
+        request (CreateUniversityRequest): The university details (name, domain, location, etc.).
+        current_user (dict): The authenticated user submitting the request.
+
+    Returns:
+        UniversityResponse: The created university details (including pending status).
+
+    Raises:
+        HTTPException(400): If the domain is invalid or already exists.
+        HTTPException(500): If creation fails due to server error.
+    """
     try:
         university = await club_manager.create_university(
             name=request.name,
@@ -101,7 +197,20 @@ async def get_approved_universities(
     limit: int = Query(50, ge=1, le=100),
     current_user: dict = Depends(require_club_member)
 ):
-    """Get all approved universities."""
+    """
+    Retrieve a list of approved universities.
+
+    This endpoint returns only universities that have been verified and approved by administrators.
+    It supports searching by name or email domain.
+
+    Args:
+        search (str, optional): Search term for university name or domain.
+        limit (int): Maximum number of results to return (default: 50).
+        current_user (dict): The authenticated user.
+
+    Returns:
+        List[UniversityResponse]: A list of approved universities.
+    """
     try:
         from second_brain_database.database import db_manager
 
@@ -130,7 +239,19 @@ async def get_university(
     university_id: str,
     current_user: dict = Depends(require_club_member)
 ):
-    """Get a specific university by ID."""
+    """
+    Get detailed information about a specific university.
+
+    Args:
+        university_id (str): The unique ID of the university.
+        current_user (dict): The authenticated user.
+
+    Returns:
+        UniversityResponse: The university details.
+
+    Raises:
+        HTTPException(404): If the university is not found or not approved.
+    """
     try:
         from second_brain_database.database import db_manager
 
@@ -156,7 +277,23 @@ async def approve_university(
     university_id: str,
     current_user: dict = Depends(require_club_owner)  # Admin only
 ):
-    """Approve a university (admin only)."""
+    """
+    Approve a pending university request (System Admin only).
+
+    This action activates the university, making it visible to all users and allowing
+    clubs to be created under it.
+
+    **Access Control:**
+    Requires system-level administrator privileges (currently restricted to Club Owners for simplicity,
+    but should be restricted to Super Admins in production).
+
+    Args:
+        university_id (str): The ID of the university to approve.
+        current_user (dict): The authenticated administrator.
+
+    Returns:
+        UniversityResponse: The updated university details with `admin_approved=True`.
+    """
     try:
         # TODO: Add admin role check
         university = await club_manager.approve_university(
@@ -182,7 +319,27 @@ async def create_club(
     request: CreateClubRequest,
     current_user: dict = Depends(require_club_member)
 ):
-    """Create a new club within a university."""
+    """
+    Create a new student club within a university.
+
+    The creator of the club automatically becomes the `OWNER` of the club.
+
+    **Process:**
+    1.  Verifies the university exists and is active.
+    2.  Creates the club document.
+    3.  Creates a `ClubMember` record for the creator with `OWNER` role.
+    4.  Initializes default settings.
+
+    Args:
+        request (CreateClubRequest): The club details (name, university_id, etc.).
+        current_user (dict): The authenticated user (creator).
+
+    Returns:
+        ClubResponse: The created club details.
+
+    Raises:
+        HTTPException(400): If the university ID is invalid.
+    """
     try:
         club = await club_manager.create_club(
             owner_id=current_user.get("_id", current_user.get("user_id")),
@@ -217,7 +374,22 @@ async def get_clubs(
     limit: int = Query(20, ge=1, le=100),
     current_user: dict = Depends(require_club_member)
 ):
-    """Get clubs with optional filtering."""
+    """
+    Retrieve a list of clubs with optional filtering.
+
+    This endpoint is the primary way to discover clubs. It supports filtering by
+    university, category, and text search.
+
+    Args:
+        university_id (str, optional): Filter by university ID.
+        category (str, optional): Filter by club category (e.g., "Tech", "Arts").
+        search (str, optional): Text search on name, description, or tags.
+        limit (int): Maximum number of results.
+        current_user (dict): The authenticated user.
+
+    Returns:
+        List[ClubResponse]: A list of active clubs matching the criteria.
+    """
     try:
         from second_brain_database.database import db_manager
 
@@ -251,7 +423,23 @@ async def search_clubs(
     request: ClubSearchRequest,
     current_user: dict = Depends(require_club_member)
 ):
-    """Advanced club search with filters."""
+    """
+    Advanced search for clubs using complex filters.
+
+    This endpoint supports more granular filtering options than the simple list endpoint,
+    including tag filtering and pagination control via a request body (GET with body pattern,
+    though often implemented as POST for complex queries, here it uses GET with dependency injection
+    or query params mapped to model - *Note: FastAPI handles `ClubSearchRequest` as query params if not specified as Body*).
+    *Correction*: The signature uses `request: ClubSearchRequest`. If `ClubSearchRequest` is a Pydantic model, FastAPI will expect it as a request body, which is non-standard for GET.
+    *Refinement*: Assuming `ClubSearchRequest` is used as a dependency or body. Given the code, it seems to be treated as a dependency if fields are simple, or body.
+
+    Args:
+        request (ClubSearchRequest): The search criteria object.
+        current_user (dict): The authenticated user.
+
+    Returns:
+        List[ClubResponse]: A list of clubs matching the search criteria.
+    """
     try:
         from second_brain_database.database import db_manager
 
@@ -338,7 +526,24 @@ async def get_club(
     club_id: str,
     current_user: dict = Depends(require_club_member)
 ):
-    """Get a specific club by ID."""
+    """
+    Get detailed information about a specific club.
+
+    **Access Control:**
+    Requires the user to be a member of the club (any role) to view full details.
+    *Note: Public info might be available via `get_clubs`, but this endpoint enforces membership.*
+
+    Args:
+        club_id (str): The unique ID of the club.
+        current_user (dict): The authenticated user.
+
+    Returns:
+        ClubResponse: The club details.
+
+    Raises:
+        HTTPException(403): If the user is not a member of the club.
+        HTTPException(404): If the club is not found.
+    """
     try:
         # Check access
         membership = await club_manager.check_club_access(
@@ -374,7 +579,26 @@ async def update_club(
     request: CreateClubRequest,  # Reuse for updates
     current_user: dict = Depends(require_club_admin)
 ):
-    """Update club settings (admin+ only)."""
+    """
+    Update club settings and profile.
+
+    This endpoint allows club administrators and owners to modify the club's
+    details, such as description, social links, and branding.
+
+    **Access Control:**
+    Requires `ADMIN` or `OWNER` role within the club.
+
+    Args:
+        club_id (str): The ID of the club to update.
+        request (CreateClubRequest): The new club details.
+        current_user (dict): The authenticated user (admin/owner).
+
+    Returns:
+        ClubResponse: The updated club details.
+
+    Raises:
+        HTTPException(403): If the user does not have admin privileges for this club.
+    """
     try:
         # Check if user has admin access to this club
         if current_user.get("club_id") != club_id:
@@ -416,7 +640,25 @@ async def deactivate_club(
     club_id: str,
     current_user: dict = Depends(require_club_owner)
 ):
-    """Deactivate a club (owner only)."""
+    """
+    Deactivate (soft-delete) a club.
+
+    This action marks the club as inactive, hiding it from search results and
+    preventing new memberships. It does not permanently delete data.
+
+    **Access Control:**
+    Requires `OWNER` role.
+
+    Args:
+        club_id (str): The ID of the club to deactivate.
+        current_user (dict): The authenticated user (owner).
+
+    Returns:
+        dict: Success message.
+
+    Raises:
+        HTTPException(403): If the user is not the owner of the club.
+    """
     try:
         # Check if user is owner
         if current_user.get("club_id") != club_id:
@@ -454,7 +696,26 @@ async def create_vertical(
     request: CreateVerticalRequest,
     current_user: dict = Depends(require_club_admin)
 ):
-    """Create a new vertical in a club (admin+ only)."""
+    """
+    Create a new vertical (sub-department) within a club.
+
+    Verticals allow clubs to organize members and activities into specific areas of interest
+    (e.g., "AI/ML", "Web Dev", "Marketing").
+
+    **Access Control:**
+    Requires `ADMIN` or `OWNER` role within the club.
+
+    Args:
+        club_id (str): The ID of the club.
+        request (CreateVerticalRequest): The vertical details (name, description, lead_id).
+        current_user (dict): The authenticated user (admin).
+
+    Returns:
+        VerticalResponse: The created vertical details.
+
+    Raises:
+        HTTPException(403): If the user does not have admin privileges.
+    """
     try:
         # Check club access
         if current_user.get("club_id") != club_id:
@@ -487,7 +748,16 @@ async def get_club_verticals(
     club_id: str,
     current_user: dict = Depends(require_club_member)
 ):
-    """Get all verticals for a club."""
+    """
+    Retrieve all active verticals for a club.
+
+    Args:
+        club_id (str): The ID of the club.
+        current_user (dict): The authenticated user.
+
+    Returns:
+        List[VerticalResponse]: A list of active verticals.
+    """
     try:
         # Check club access
         if current_user.get("club_id") != club_id:
@@ -516,7 +786,22 @@ async def get_vertical(
     vertical_id: str,
     current_user: dict = Depends(require_club_member)
 ):
-    """Get a specific vertical by ID."""
+    """
+    Get detailed information about a specific vertical.
+
+    **Access Control:**
+    Requires membership in the parent club.
+
+    Args:
+        vertical_id (str): The unique ID of the vertical.
+        current_user (dict): The authenticated user.
+
+    Returns:
+        VerticalResponse: The vertical details.
+
+    Raises:
+        HTTPException(404): If the vertical is not found.
+    """
     try:
         from second_brain_database.database import db_manager
 
@@ -552,7 +837,22 @@ async def update_vertical(
     request: CreateVerticalRequest,
     current_user: dict = Depends(require_club_admin)
 ):
-    """Update a vertical (admin+ only)."""
+    """
+    Update vertical details.
+
+    Allows updating the name, description, color, and icon of a vertical.
+
+    **Access Control:**
+    Requires `ADMIN` or `OWNER` role in the parent club.
+
+    Args:
+        vertical_id (str): The ID of the vertical to update.
+        request (CreateVerticalRequest): The new details.
+        current_user (dict): The authenticated user (admin).
+
+    Returns:
+        VerticalResponse: The updated vertical.
+    """
     try:
         from second_brain_database.database import db_manager
 
@@ -601,7 +901,25 @@ async def assign_vertical_lead(
     lead_id: str = Query(..., description="New lead user ID"),
     current_user: dict = Depends(require_club_admin)
 ):
-    """Assign or change vertical lead (admin+ only)."""
+    """
+    Assign or change the lead of a vertical.
+
+    The new lead must already be a member of the club.
+
+    **Access Control:**
+    Requires `ADMIN` or `OWNER` role in the parent club.
+
+    Args:
+        vertical_id (str): The ID of the vertical.
+        lead_id (str): The user ID of the new lead.
+        current_user (dict): The authenticated user (admin).
+
+    Returns:
+        dict: Success message.
+
+    Raises:
+        HTTPException(400): If the proposed lead is not a club member.
+    """
     try:
         from second_brain_database.database import db_manager
 
@@ -652,7 +970,19 @@ async def remove_vertical(
     vertical_id: str,
     current_user: dict = Depends(require_club_admin)
 ):
-    """Remove a vertical (admin+ only)."""
+    """
+    Deactivate (soft-delete) a vertical.
+
+    **Access Control:**
+    Requires `ADMIN` or `OWNER` role in the parent club.
+
+    Args:
+        vertical_id (str): The ID of the vertical to remove.
+        current_user (dict): The authenticated user (admin).
+
+    Returns:
+        dict: Success message.
+    """
     try:
         from second_brain_database.database import db_manager
 
@@ -702,7 +1032,26 @@ async def invite_member(
     request: InviteMemberRequest,
     current_user: dict = Depends(require_club_lead)
 ):
-    """Invite a user to join a club (lead+ only)."""
+    """
+    Invite a user to join the club.
+
+    This endpoint creates a pending membership record for the invited user.
+    The user must accept the invitation to become an active member.
+
+    **Access Control:**
+    Requires `LEAD`, `ADMIN`, or `OWNER` role. Leads can only invite to their vertical.
+
+    Args:
+        club_id (str): The ID of the club.
+        request (InviteMemberRequest): The invitation details (user_id, role, vertical_id).
+        current_user (dict): The authenticated user (inviter).
+
+    Returns:
+        ClubMemberResponse: The pending membership details.
+
+    Raises:
+        HTTPException(400): If the user is already a member or invited.
+    """
     try:
         # Check club access
         if current_user.get("club_id") != club_id:
@@ -736,7 +1085,23 @@ async def bulk_invite_members(
     request: BulkInviteRequest,
     current_user: dict = Depends(require_club_admin)
 ):
-    """Bulk invite multiple members to a club (admin+ only)."""
+    """
+    Bulk invite multiple users to the club.
+
+    Efficiently processes a list of invitations. Errors for individual users (e.g., already a member)
+    are logged but do not stop the entire batch.
+
+    **Access Control:**
+    Requires `ADMIN` or `OWNER` role.
+
+    Args:
+        club_id (str): The ID of the club.
+        request (BulkInviteRequest): A list of invitation requests.
+        current_user (dict): The authenticated user (admin).
+
+    Returns:
+        List[ClubMemberResponse]: A list of successfully created invitations.
+    """
     try:
         # Check club access
         if current_user.get("club_id") != club_id:
@@ -773,7 +1138,21 @@ async def accept_invitation(
     member_id: str,
     current_user: dict = Depends(require_club_member)
 ):
-    """Accept a club invitation."""
+    """
+    Accept a pending club invitation.
+
+    This action activates the user's membership in the club.
+
+    Args:
+        member_id (str): The ID of the membership record (from the invitation).
+        current_user (dict): The authenticated user (must match the invited user).
+
+    Returns:
+        ClubMemberResponse: The active membership details.
+
+    Raises:
+        HTTPException(400): If the invitation is invalid or not for this user.
+    """
     try:
         member = await club_manager.accept_invitation(
             member_id=member_id,
@@ -797,7 +1176,22 @@ async def update_member_role(
     request: UpdateMemberRoleRequest,
     current_user: dict = Depends(require_club_admin)
 ):
-    """Update member role (admin+ only)."""
+    """
+    Promote or demote a club member.
+
+    Allows changing a member's role (e.g., Member -> Lead) and vertical assignment.
+
+    **Access Control:**
+    Requires `ADMIN` or `OWNER` role.
+
+    Args:
+        member_id (str): The ID of the member to update.
+        request (UpdateMemberRoleRequest): The new role and vertical.
+        current_user (dict): The authenticated user (admin).
+
+    Returns:
+        ClubMemberResponse: The updated member details.
+    """
     try:
         from second_brain_database.database import db_manager
 
@@ -849,7 +1243,20 @@ async def transfer_member(
     request: TransferMemberRequest,
     current_user: dict = Depends(require_club_admin)
 ):
-    """Transfer member between verticals (admin+ only)."""
+    """
+    Transfer a member to a different vertical.
+
+    **Access Control:**
+    Requires `ADMIN` or `OWNER` role.
+
+    Args:
+        member_id (str): The ID of the member.
+        request (TransferMemberRequest): The new vertical ID.
+        current_user (dict): The authenticated user (admin).
+
+    Returns:
+        ClubMemberResponse: The updated member details.
+    """
     try:
         from second_brain_database.database import db_manager
 
@@ -909,7 +1316,21 @@ async def mark_member_alumni(
     member_id: str,
     current_user: dict = Depends(require_club_admin)
 ):
-    """Mark member as alumni (admin+ only)."""
+    """
+    Mark a member as an alumni.
+
+    Alumni retain read-only access to the club but are not considered active members.
+
+    **Access Control:**
+    Requires `ADMIN` or `OWNER` role.
+
+    Args:
+        member_id (str): The ID of the member.
+        current_user (dict): The authenticated user (admin).
+
+    Returns:
+        ClubMemberResponse: The updated member details.
+    """
     try:
         from second_brain_database.database import db_manager
 
@@ -959,7 +1380,24 @@ async def remove_member(
     member_id: str,
     current_user: dict = Depends(require_club_admin)
 ):
-    """Remove a member from club (admin+ only)."""
+    """
+    Remove (kick) a member from the club.
+
+    This action deactivates the membership. The user will lose access to club resources.
+
+    **Access Control:**
+    Requires `ADMIN` or `OWNER` role. Cannot remove the Owner.
+
+    Args:
+        member_id (str): The ID of the member to remove.
+        current_user (dict): The authenticated user (admin).
+
+    Returns:
+        dict: Success message.
+
+    Raises:
+        HTTPException(400): If attempting to remove the club owner.
+    """
     try:
         from second_brain_database.database import db_manager
 
@@ -1023,7 +1461,15 @@ async def remove_member(
 async def get_my_clubs(
     current_user: dict = Depends(require_club_member)
 ):
-    """Get all clubs the current user is a member of."""
+    """
+    Retrieve all clubs the current user has joined.
+
+    Args:
+        current_user (dict): The authenticated user.
+
+    Returns:
+        List[ClubResponse]: A list of clubs where the user is a member.
+    """
     try:
         clubs = await club_manager.get_user_clubs(
             current_user.get("_id", current_user.get("user_id"))
@@ -1042,7 +1488,20 @@ async def get_club_members(
     include_alumni: bool = Query(False, description="Include alumni members"),
     current_user: dict = Depends(require_club_member)
 ):
-    """Get all members of a club."""
+    """
+    Retrieve the member directory for a club.
+
+    **Access Control:**
+    Requires membership in the club.
+
+    Args:
+        club_id (str): The ID of the club.
+        include_alumni (bool): Whether to include alumni in the list.
+        current_user (dict): The authenticated user.
+
+    Returns:
+        List[ClubMemberResponse]: A list of club members.
+    """
     try:
         # Check club access
         if current_user.get("club_id") != club_id:
@@ -1073,7 +1532,21 @@ async def get_club_member_activity(
     club_id: str,
     current_user: dict = Depends(require_club_admin)
 ):
-    """Get member activity analytics for a club (admin+ only)."""
+    """
+    Get member activity analytics (Admin only).
+
+    Provides insights into member growth, vertical participation, and engagement scores.
+
+    **Access Control:**
+    Requires `ADMIN` or `OWNER` role.
+
+    Args:
+        club_id (str): The ID of the club.
+        current_user (dict): The authenticated user (admin).
+
+    Returns:
+        ClubAnalyticsResponse: Analytics data.
+    """
     try:
         # Check club access
         if current_user.get("club_id") != club_id:
@@ -1104,7 +1577,19 @@ async def login_to_club(
     club_id: str,
     current_user: dict = Depends(require_club_member)
 ):
-    """Login to a specific club and get club-scoped token."""
+    """
+    Authenticate into a specific club context.
+
+    Issues a club-scoped JWT token containing the user's role and vertical assignment
+    within that specific club. This token is used for subsequent club-specific operations.
+
+    Args:
+        club_id (str): The ID of the club.
+        current_user (dict): The authenticated user.
+
+    Returns:
+        dict: Access token and role information.
+    """
     try:
         # Check if user has access to this club
         membership = await club_manager.check_club_access(
@@ -1151,7 +1636,29 @@ async def create_club_event(
     request: CreateEventRequest,
     current_user: dict = Depends(require_club_lead)
 ):
-    """Create a club event with WebRTC room setup and notifications."""
+    """
+    Create a new club event.
+
+    Supports creating physical, virtual, or hybrid events.
+    Automatically sets up a WebRTC room for virtual events if requested.
+    Sends email announcements to club members.
+
+    **Features:**
+    *   **WebRTC Integration**: Creates a video room for virtual events.
+    *   **Notifications**: Emails all club members about the new event.
+    *   **Scheduling**: Validates start and end times.
+
+    **Access Control:**
+    Requires `LEAD`, `ADMIN`, or `OWNER` role.
+
+    Args:
+        club_id (str): The ID of the club.
+        request (CreateEventRequest): The event details.
+        current_user (dict): The authenticated user (organizer).
+
+    Returns:
+        EventResponse: The created event details.
+    """
     try:
         # Check club access
         if current_user.get("club_id") != club_id:
@@ -1238,7 +1745,20 @@ async def get_club_events(
     limit: int = Query(20, ge=1, le=100),
     current_user: dict = Depends(require_club_member)
 ):
-    """Get events for a club."""
+    """
+    Retrieve a list of events for a club.
+
+    Args:
+        club_id (str): The ID of the club.
+        status (EventStatus, optional): Filter by status (e.g., PUBLISHED, CANCELLED).
+        event_type (EventType, optional): Filter by type (e.g., WORKSHOP, MEETING).
+        upcoming_only (bool): If True, returns only future events.
+        limit (int): Maximum number of results.
+        current_user (dict): The authenticated user.
+
+    Returns:
+        List[EventResponse]: A list of events.
+    """
     try:
         # Check club access
         membership = await club_manager.check_club_access(
@@ -1282,7 +1802,18 @@ async def search_events(
     request: EventSearchRequest,
     current_user: dict = Depends(require_club_member)
 ):
-    """Advanced event search across clubs."""
+    """
+    Search for events across all clubs the user is a member of.
+
+    Supports complex filtering by date range, type, tags, and organizer.
+
+    Args:
+        request (EventSearchRequest): The search criteria.
+        current_user (dict): The authenticated user.
+
+    Returns:
+        List[EventResponse]: A list of matching events.
+    """
     try:
         from second_brain_database.database import db_manager
 

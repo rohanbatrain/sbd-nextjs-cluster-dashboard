@@ -1,8 +1,102 @@
 """
-FastAPI dependencies for security lockdown enforcement.
+# Authentication Dependencies
 
-This module provides dependency functions for enforcing IP and User Agent lockdown
-across all protected endpoints in the application.
+This module provides **FastAPI dependency injection functions** for authentication and security enforcement.
+These reusable dependencies are used across the API to handle authentication, context management,
+and security lockdowns, ensuring that security policies are applied consistently to all protected endpoints.
+
+## Domain Overview
+
+The dependency system implements a layered security model:
+
+- **Layer 1: Authentication** - Verify JWT token and retrieve user
+- **Layer 2: Context Injection** - Set tenant and workspace contexts for multi-tenancy
+- **Layer 3: Security Lockdowns** - Enforce IP and User-Agent restrictions (Trusted Devices)
+
+## Key Dependencies
+
+### 1. `get_current_user_dep`
+The foundational authentication dependency that:
+- Validates JWT access tokens
+- Fetches the user document from MongoDB
+- Extracts tenant information from the token payload
+- Sets the global tenant context for the request
+- Enriches the user object with workspace memberships
+
+**Usage:**
+```python
+@router.get("/profile")
+async def get_profile(current_user: dict = Depends(get_current_user_dep)):
+    return {"username": current_user["username"]}
+```
+
+### 2. `enforce_ip_lockdown`
+Enforces the "Trusted IP Lockdown" security feature:
+- Checks if the user has enabled IP restrictions
+- Verifies the request IP against the user's trusted IP list
+- Blocks untrusted IPs with a 403 error
+- Logs security events and sends email notifications
+
+**Behavior:**
+- **Lockdown Disabled**: Passes through without checking
+- **Lockdown Enabled & IP Trusted**: Passes through
+- **Lockdown Enabled & IP Untrusted**: Blocks request, logs event, sends email
+
+### 3. `enforce_user_agent_lockdown`
+Enforces the "Trusted User-Agent Lockdown" security feature:
+- Restricts access to specific browsers/devices (identified by User-Agent string)
+- Similar behavior to IP lockdown but for device fingerprinting
+
+### 4. `enforce_all_lockdowns`
+The comprehensive security dependency that chains all checks:
+- Authentication (`get_current_user_dep`)
+- IP restrictions (`enforce_ip_lockdown`)
+- Device restrictions (`enforce_user_agent_lockdown`)
+
+**Recommended Usage:**
+```python
+@router.post("/sensitive-action")
+async def sensitive_action(current_user: dict = Depends(enforce_all_lockdowns)):
+    # User is authenticated AND passed all security checks
+    pass
+```
+
+## Multi-Tenancy Context
+
+The `get_current_user_dep` dependency automatically sets up the tenant context for each request:
+
+1. **Token Payload**: Extracts `primary_tenant_id` and `tenant_memberships` from JWT
+2. **Global Context**: Sets the tenant context using `set_tenant_context()`
+3. **User Enrichment**: Adds tenant and workspace data to the user object
+
+This ensures that all database queries are automatically scoped to the correct tenant.
+
+## Security Event Logging
+
+All security violations are logged with comprehensive details:
+- Event type (`ip_lockdown_violation`, `user_agent_lockdown_violation`)
+- User ID and IP address
+- Attempted vs. trusted values
+- Endpoint and timestamp
+- User-Agent and other request metadata
+
+Logs are written to the `logs` collection for security auditing and threat detection.
+
+## Email Notifications
+
+When a lockdown violation occurs, the system:
+1. Logs the security event
+2. Sends an HTML email to the user with:
+   - Details of the blocked attempt
+   - List of currently trusted IPs/User-Agents
+   - Action buttons to allow the access or add to trusted list
+
+This provides transparency and allows users to quickly resolve legitimate access issues.
+
+## Module Attributes
+
+Attributes:
+    oauth2_scheme (OAuth2PasswordBearer): FastAPI OAuth2 token extractor
 """
 
 from typing import Any, Dict
@@ -23,10 +117,27 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 async def get_current_user_dep(token: str = Depends(oauth2_scheme)):
     """
-    Dependency function to retrieve the current authenticated user, augmented with
-    their workspace memberships, roles, and tenant context.
-    
-    This function also sets the tenant context for automatic tenant filtering in database operations.
+    Retrieve and enrich the current authenticated user context.
+
+    This dependency performs several critical functions:
+    1.  **Authentication**: Validates the JWT token and fetches the user from the database.
+    2.  **Multi-tenancy**: Extracts tenant information (`primary_tenant_id`, `tenant_memberships`)
+        from the token and sets the global tenant context for the request.
+    3.  **Workspace Context**: Fetches the user's workspace memberships and adds them to the user object.
+
+    **Context Injection:**
+    The returned user object is enriched with:
+    *   `current_tenant_id`: The active tenant for this request.
+    *   `workspaces`: A list of workspaces the user has access to.
+
+    Args:
+        token (str): The JWT access token (injected by FastAPI).
+
+    Returns:
+        dict: The enriched user document.
+
+    Raises:
+        HTTPException(401): If the token is invalid or the user does not exist.
     """
     from second_brain_database.routes.auth.services.auth.login import get_current_user
     from second_brain_database.middleware.tenant_context import set_tenant_context, get_current_tenant_id
@@ -77,6 +188,7 @@ async def get_current_user_dep(token: str = Depends(oauth2_scheme)):
             # but the user won't have workspace context.
             user["workspaces"] = []
 
+
     return user
 
 
@@ -84,20 +196,28 @@ async def enforce_ip_lockdown(
     request: Request, current_user: Dict[str, Any] = Depends(get_current_user_dep)
 ) -> Dict[str, Any]:
     """
-    FastAPI dependency for IP lockdown enforcement.
+    Enforce Trusted IP Lockdown policy.
 
-    Checks if the user has IP lockdown enabled and validates the request IP
-    against their trusted IP list. Sends email notifications for blocked attempts.
+    This dependency checks if the user has enabled "Trusted IP Lockdown". If enabled,
+    it verifies that the request's source IP address is in the user's list of trusted IPs.
+
+    **Behavior:**
+    *   **Lockdown Disabled**: Passes through without checking (returns user).
+    *   **Lockdown Enabled & IP Trusted**: Passes through.
+    *   **Lockdown Enabled & IP Untrusted**:
+        1.  Blocks the request (raises 403).
+        2.  Logs a security event (`ip_lockdown_violation`).
+        3.  Sends an email notification to the user about the blocked attempt.
 
     Args:
-        request (Request): The FastAPI request object
-        current_user (Dict[str, Any]): The authenticated user document
+        request (Request): The HTTP request object.
+        current_user (Dict): The authenticated user.
 
     Returns:
-        Dict[str, Any]: The user document if IP lockdown passes
+        Dict: The user object (if check passes).
 
     Raises:
-        HTTPException: If IP lockdown blocks the request
+        HTTPException(403): If the IP is not trusted.
     """
     try:
         # Check IP lockdown using the security manager
@@ -164,20 +284,28 @@ async def enforce_user_agent_lockdown(
     request: Request, current_user: Dict[str, Any] = Depends(get_current_user_dep)
 ) -> Dict[str, Any]:
     """
-    FastAPI dependency for User Agent lockdown enforcement.
+    Enforce Trusted User-Agent Lockdown policy.
 
-    Checks if the user has User Agent lockdown enabled and validates the request
-    User Agent against their trusted User Agent list.
+    Similar to IP lockdown, this dependency restricts access to specific browsers or devices
+    (identified by User-Agent string) if the user has enabled this feature.
+
+    **Behavior:**
+    *   **Lockdown Disabled**: Passes through.
+    *   **Lockdown Enabled & UA Trusted**: Passes through.
+    *   **Lockdown Enabled & UA Untrusted**:
+        1.  Blocks the request (raises 403).
+        2.  Logs a security event (`user_agent_lockdown_violation`).
+        3.  Sends an email notification.
 
     Args:
-        request (Request): The FastAPI request object
-        current_user (Dict[str, Any]): The authenticated user document
+        request (Request): The HTTP request object.
+        current_user (Dict): The authenticated user.
 
     Returns:
-        Dict[str, Any]: The user document if User Agent lockdown passes
+        Dict: The user object (if check passes).
 
     Raises:
-        HTTPException: If User Agent lockdown blocks the request
+        HTTPException(403): If the User-Agent is not trusted.
     """
     try:
         # Check User Agent lockdown using the security manager
@@ -253,24 +381,24 @@ async def enforce_all_lockdowns(
     request: Request, current_user: Dict[str, Any] = Depends(get_current_user_dep)
 ) -> Dict[str, Any]:
     """
-    Combined dependency for both IP and User Agent lockdown enforcement.
+    Comprehensive security dependency enforcing all lockdown policies.
 
-    Applies both IP and User Agent lockdown checks in sequence. If either
-    lockdown is enabled and blocks the request, appropriate logging and
-    notifications are handled by the individual dependency functions.
+    This is the primary dependency used by protected endpoints. It chains together:
+    1.  `get_current_user_dep`: Authentication & Context.
+    2.  `enforce_ip_lockdown`: IP restrictions.
+    3.  `enforce_user_agent_lockdown`: Device restrictions.
 
-    This function ensures consistent application of all lockdown policies
-    across protected endpoints through FastAPI dependency injection.
+    Using this dependency ensures that all enabled security layers are active for the endpoint.
 
     Args:
-        request (Request): The FastAPI request object
-        current_user (Dict[str, Any]): The authenticated user document
+        request (Request): The HTTP request object.
+        current_user (Dict): The authenticated user.
 
     Returns:
-        Dict[str, Any]: The user document if all lockdown checks pass
+        Dict: The user object (if all checks pass).
 
     Raises:
-        HTTPException: If any lockdown check blocks the request
+        HTTPException: If any security check fails.
     """
     user_id = current_user.get("username", current_user.get("_id", "unknown"))
     endpoint = f"{request.method} {request.url.path}"

@@ -1,9 +1,65 @@
 """
-Admin API endpoints for password reset abuse management, whitelist/blocklist, and abuse event review.
+# Admin Routes
 
-- PEP 8/257 compliant, MyPy strict compatible.
-- All endpoints are typed, with docstrings for each route.
-- Linting/tooling config at file end.
+This module provides the **REST API endpoints** for System Administration.
+It focuses on security management, abuse prevention, and operational oversight.
+
+## Domain Overview
+
+Administrators need tools to protect the platform from abuse and manage user access.
+This module exposes endpoints for:
+- **Abuse Management**: Whitelisting/Blocklisting IPs and Emails.
+- **Incident Response**: Reviewing and resolving security alerts.
+- **System Oversight**: (Future) Monitoring system health and metrics.
+
+## Key Features
+
+### 1. Whitelist/Blocklist Control
+- **Whitelist**: Exempts trusted users/IPs from strict rate limits.
+- **Blocklist**: Permanently bans malicious actors from specific actions.
+- **Dual-Store**: Updates both Redis (for speed) and MongoDB (for persistence).
+
+### 2. Abuse Event Review
+- **Listing**: View unresolved security incidents.
+- **Resolution**: Mark events as resolved with admin notes.
+- **Audit**: Track who resolved an event and when.
+
+## API Endpoints
+
+### Access Control
+- `POST /admin/whitelist` - Add to whitelist
+- `DELETE /admin/whitelist` - Remove from whitelist
+- `GET /admin/whitelist` - List whitelist
+- `POST /admin/blocklist` - Add to blocklist
+
+### Incident Management
+- `GET /admin/abuse-events` - List incidents
+- `POST /admin/abuse-events/resolve` - Resolve incident
+
+## Usage Examples
+
+### Whitelisting a User
+
+```python
+await client.post("/admin/whitelist", json={
+    "email": "vip@example.com",
+    "ip": "10.0.0.1"
+})
+```
+
+### Resolving an Incident
+
+```python
+await client.post("/admin/abuse-events/resolve", json={
+    "event_id": "evt_123",
+    "notes": "False positive, user verified."
+})
+```
+
+## Module Attributes
+
+Attributes:
+    router (APIRouter): FastAPI router with `/admin` prefix
 """
 
 from fastapi import APIRouter, Depends, Query

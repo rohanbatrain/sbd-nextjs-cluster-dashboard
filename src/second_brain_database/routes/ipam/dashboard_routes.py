@@ -1,8 +1,41 @@
 """
-IPAM Dashboard API Routes.
+# IPAM Dashboard Routes
 
-Simplified dashboard endpoints that match frontend expectations.
-These are convenience wrappers around the main statistics endpoints.
+This module provides **aggregated statistics** for the IPAM Dashboard.
+It offers high-level insights into IP address usage, capacity, and activity.
+
+## Domain Overview
+
+The IPAM Dashboard gives network administrators a bird's-eye view of the network.
+Key metrics include:
+- **Utilization**: Percentage of available IP space currently allocated.
+- **Distribution**: Top countries or regions by usage.
+- **Activity**: Recent allocations and modifications.
+
+## Key Features
+
+### 1. Statistical Aggregation
+- **Global Stats**: Total countries, regions, hosts, and overall utilization.
+- **Top Lists**: Ranking countries by allocation count.
+- **Caching**: Heavy calculations are cached to ensure dashboard responsiveness.
+
+### 2. Activity Feed
+- **Audit Log**: Recent actions (create, update, delete) performed by the user.
+- **Context**: Includes timestamps, resource types, and action details.
+
+## API Endpoints
+
+- `GET /ipam/dashboard/stats` - General statistics
+- `GET /ipam/dashboard/top-countries` - Utilization ranking
+- `GET /ipam/dashboard/recent-activity` - Audit log feed
+
+## Usage Example
+
+```python
+# Get dashboard overview
+stats = await client.get("/ipam/dashboard/stats")
+print(f"Overall Utilization: {stats['overall_utilization']}%")
+```
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status

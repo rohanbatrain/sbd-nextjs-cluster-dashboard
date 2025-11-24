@@ -1,11 +1,37 @@
 """
-Admin service functions for password reset abuse management,
-whitelist/blocklist, and abuse event review.
+# Admin Service
 
-- PEP 8/257 compliant, MyPy strict compatible.
-- Centralized logging with robust error handling.
-- All functions typed, with docstrings and constants.
-- Linting/tooling config at file end.
+This module implements the **business logic** for Administrative Operations.
+It handles the interaction between the API, Redis, and MongoDB for security tasks.
+
+## Domain Overview
+
+The Admin Service acts as the enforcer of administrative policies:
+- **Consistency**: Ensures Redis and MongoDB remain in sync for access lists.
+- **Logging**: Provides detailed audit logs for all admin actions.
+- **Validation**: Verifies admin permissions and input validity.
+
+## Key Features
+
+### 1. Dual-Layer Storage Management
+- **Redis**: Used for O(1) access checks during request processing.
+- **MongoDB**: Used for durable storage and reporting.
+- **Sync**: Operations update both stores atomically where possible.
+
+### 2. Abuse Incident Handling
+- **Aggregation**: Fetches events from the `abuse_events` collection.
+- **Filtering**: Supports filtering by resolution status.
+- **Resolution**: Updates event status and appends admin notes.
+
+## Usage Example
+
+```python
+# Add to blocklist
+await admin_add_blocklist_pair("spammer@bad.com", "1.2.3.4")
+
+# List unresolved events
+events = await admin_list_abuse_events(resolved=False)
+```
 """
 
 from typing import Dict, List, Optional

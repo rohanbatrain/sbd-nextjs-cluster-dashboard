@@ -1,7 +1,43 @@
-"""LangGraph Cloud API-compatible routes.
+"""
+# LangGraph API Routes
 
-These routes provide a LangGraph SDK-compatible API layer on top of
-the existing ChatService, enabling the frontend to use @langchain/langgraph-sdk.
+This module provides the **REST API endpoints** compatible with the LangGraph Cloud API.
+It allows the frontend to use the `@langchain/langgraph-sdk` client to interact with the backend.
+
+## Domain Overview
+
+This API layer wraps the existing `ChatService` to expose it as a LangGraph-compatible service.
+It supports:
+- **Thread Management**: CRUD operations for conversation threads.
+- **State Access**: Retrieving the current state (messages) of a thread.
+- **Streaming Runs**: Executing graph runs with real-time streaming updates.
+
+## Key Features
+
+### 1. SDK Compatibility
+- **Endpoints**: Matches the paths expected by the SDK (e.g., `/threads/{id}/runs/stream`).
+- **Response Formats**: Returns data in the exact structure required by the client.
+
+### 2. Integration
+- **ChatService**: Reuses the robust existing chat logic and database storage.
+- **Security**: Enforces standard authentication and RBAC via dependencies.
+
+## API Endpoints
+
+- `GET /info` - Available graphs
+- `POST /threads` - Create thread
+- `GET /threads/{id}` - Get thread details
+- `POST /threads/{id}/runs/stream` - Stream graph execution
+
+## Usage Example
+
+```python
+# Client side (LangGraph SDK)
+client = LangGraphClient(url="...")
+thread = await client.threads.create()
+async for chunk in client.runs.stream(thread.id, input={"messages": [...]})
+    print(chunk)
+```
 """
 
 import json

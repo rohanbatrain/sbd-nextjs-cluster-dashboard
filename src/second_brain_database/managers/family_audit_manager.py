@@ -83,15 +83,41 @@ class ComplianceReportError(FamilyAuditError):
 
 class FamilyAuditManager:
     """
-    Enterprise-grade family audit management system for SBD token compliance.
+    Enterprise-grade audit management system for family SBD token compliance and security.
 
-    This manager implements comprehensive audit trail management with:
-    - Immutable audit trail logging with cryptographic integrity
-    - Family member attribution in all transactions
-    - Compliance reporting for regulatory requirements
-    - Transaction history retrieval with family context
-    - Audit trail export capabilities
-    - Real-time audit event streaming
+    Provides comprehensive audit trail logging, transaction attribution, compliance reporting,
+    and suspicious activity detection for regulatory requirements.
+
+    **Core Features:**
+    - **Immutable audit trails**: Cryptographic integrity with hash verification
+    - **Transaction attribution**: Family member attribution in all transactions
+    - **Compliance reporting**: Regulatory-compliant reports (JSON, CSV, PDF)
+    - **Suspicious activity detection**: ML-based pattern analysis
+    - **Data retention**: 7-year retention for financial compliance
+
+    **Audit Trail Components:**
+    - Transaction details (amount, accounts, type)
+    - Family member attribution (ID, username, timestamp)
+    - Transaction context (IP, user agent, metadata)
+    - Compliance metadata (retention, regulatory flags)
+    - Integrity hash (SHA-256 for tamper detection)
+
+    **Compliance Features:**
+    - **Regulatory reporting**: Automated compliance report generation
+    - **Suspicious activity**: Pattern detection and risk scoring
+    - **Data export**: Multiple formats for auditors
+    - **Retention policies**: Automatic data lifecycle management
+
+    **Security Analysis:**
+    - High-frequency transaction detection
+    - Unusual amount outlier analysis
+    - Off-hours activity monitoring
+    - Rapid permission change detection
+    - Failed operation pattern analysis
+
+    **Collections:**
+    - `family_audit_trails`: Immutable audit records
+    - `family_audit_summaries`: Aggregated audit data
     """
 
     def __init__(self, db_manager=None) -> None:

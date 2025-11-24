@@ -142,14 +142,49 @@ class FamilyMetrics:
 
 class FamilyMonitor:
     """
-    Comprehensive monitoring and observability for the family management system.
+    Comprehensive monitoring and observability system for family management operations.
 
-    This class provides:
-    - Structured logging for all family operations
-    - Performance monitoring with configurable thresholds
-    - Health checks for system components
-    - Metrics collection and alerting
-    - Operational dashboards and reporting
+    Provides structured logging, performance monitoring, health checks, metrics collection,
+    and alerting for production deployment.
+
+    **Monitoring Capabilities:**
+    - **Structured logging**: JSON-formatted logs for all family operations
+    - **Performance tracking**: Operation duration and success rate monitoring
+    - **Health checks**: Component-level health status verification
+    - **Metrics collection**: Real-time operational metrics
+    - **Alerting**: Configurable alerts for critical events
+
+    **Performance Monitoring:**
+    - Slow operation detection (>2s warning, >5s error)
+    - Error rate tracking (5% warning, 10% critical)
+    - Operation-specific performance metrics
+    - Historical performance data (1-hour rolling window)
+
+    **Health Check Components:**
+    - **Database**: MongoDB connectivity and collection access
+    - **Redis**: Cache connectivity and performance
+    - **Family collections**: Data integrity verification
+    - **SBD integration**: Virtual account system health
+    - **Email system**: Invitation delivery capability
+    - **Notification system**: Notification queue status
+
+    **Metrics Collected:**
+    - Total families and active families
+    - Total members and average family size
+    - Pending invitations and token requests
+    - Operations per minute by type
+    - Error rates by operation
+    - SBD token metrics
+
+    **Alert Types:**
+    - **INFO**: Normal operational events
+    - **WARNING**: Slow operations, high error rates
+    - **ERROR**: Very slow operations, critical errors
+    - **CRITICAL**: System failures, critical error rates
+
+    **Alert Cooldown:**
+    - 30-minute cooldown period to prevent alert spam
+    - Severity-based alert routing
     """
 
     def __init__(self):

@@ -1,3 +1,59 @@
+"""
+# User Profile Routes
+
+This module defines the API endpoints for managing **User Profiles**.
+It allows authenticated users to view and update their personal information, ensuring
+data consistency and privacy.
+
+## Domain Overview
+
+The profile system manages the user's public and private identity information:
+- **Personal Details**: Name, Date of Birth, Gender
+- **Bio**: A short biography or description
+- **Identity**: Username and Email (read-only in this context)
+
+## Key Features
+
+### 1. Profile Management
+- **Update**: Users can modify their mutable profile fields.
+- **Retrieval**: Users can fetch their current profile data.
+- **Validation**: Strict type and length checks on all input fields.
+
+### 2. Security & Privacy
+- **Lockdown Enforcement**: All endpoints are protected by `enforce_all_lockdowns`.
+- **Data Minimization**: Only safe, non-sensitive fields are returned by the info endpoint.
+- **Audit Logging**: All profile changes are logged with IP and User-Agent context.
+
+## API Endpoints
+
+- `POST /profile/update` - Update mutable profile fields
+- `GET /profile/info` - Retrieve current profile information
+
+## Usage Examples
+
+### Updating User Bio
+
+```python
+response = await client.post("/profile/update", json={
+    "user_bio": "AI Researcher and Python Enthusiast",
+    "user_first_name": "Jane"
+})
+assert response.status_code == 200
+```
+
+### Retrieving Profile
+
+```python
+response = await client.get("/profile/info")
+profile = response.json()["profile"]
+print(f"Hello, {profile['user_first_name']}")
+```
+
+## Module Attributes
+
+Attributes:
+    router (APIRouter): FastAPI router with `/profile` prefix
+"""
 from datetime import datetime, timezone
 import re
 

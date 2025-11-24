@@ -22,10 +22,33 @@ logger = get_logger(prefix="[Club Auth Manager]")
 
 class ClubAuthManager:
     """
-    Manager for club authentication and authorization.
+    Manages club-scoped authentication and role-based authorization.
 
-    Handles club-scoped JWT tokens, role-based access control, and
-    club-level permission checking.
+    Extends the core JWT authentication system to support multi-tenant club operations
+    with club-level access control, vertical permissions, and role hierarchies.
+
+    **Features:**
+    - **Club-scoped tokens**: JWT tokens with club and vertical context
+    - **Role-based access**: Hierarchical role system (Owner > Admin > Lead > Member)
+    - **Vertical permissions**: Sub-team level access control
+    - **Token caching**: Redis-based token validation caching
+    - **Permission checking**: Club and vertical-level permission verification
+
+    **Token Claims:**
+    - `sub`: Username
+    - `user_id`: User ID
+    - `club_id`: Club ID
+    - `role`: Club role
+    - `vertical_id`: Optional vertical ID
+    - `token_type`: "club"
+    - `exp`: Expiration timestamp
+    - `iat`: Issued at timestamp
+
+    **Role Hierarchy:**
+    - **Owner** (3): Full control, can delete club
+    - **Admin** (2): Manage members, settings, all verticals
+    - **Lead** (1): Manage specific vertical
+    - **Member** (0): Participate in club activities
     """
 
     def __init__(self):

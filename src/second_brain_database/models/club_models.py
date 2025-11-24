@@ -1,8 +1,67 @@
 """
-Club Management Models for Second Brain Database.
+# University Club Models
 
-This module defines Pydantic models for university clubs, verticals, and members
-with comprehensive validation and hierarchical relationships.
+This module defines the **hierarchical data structures** for the University Clubs platform.
+It models the complex relationships between universities, clubs, verticals (sub-teams), and members,
+along with event management and WebRTC integration.
+
+## Domain Model Overview
+
+The club system is organized into a four-level hierarchy:
+
+1.  **University**: The root entity (e.g., "Stanford University"). Verified by domain.
+2.  **Club**: A student organization under a university (e.g., "Robotics Club").
+3.  **Vertical**: A specialized sub-team within a club (e.g., "Drone Team").
+4.  **Member**: A user with a specific role in a club/vertical.
+
+## Key Features
+
+### 1. Role-Based Access Control (RBAC)
+- **Owner**: Full control over the club.
+- **Admin**: Can manage members and events.
+- **Lead**: Manages a specific vertical.
+- **Member**: Standard participation rights.
+
+### 2. Event Management
+- **Lifecycle**: Draft → Published → Completed/Cancelled.
+- **Visibility**: Public, Members Only, or Invite Only.
+- **Virtual Events**: Integration with WebRTC for online meetings.
+
+### 3. Verification System
+- **Universities**: Verified via email domain (e.g., `@stanford.edu`).
+- **Clubs**: Approved by university admins or system admins.
+
+## Usage Examples
+
+### Defining a Club
+
+```python
+club = CreateClubRequest(
+    name="AI Society",
+    category=ClubCategory.TECH,
+    university_id="uni_123",
+    slug="ai-society"  # Auto-generated if omitted
+)
+```
+
+### Creating an Event
+
+```python
+event = CreateEventRequest(
+    title="Intro to ML Workshop",
+    event_type=EventType.WORKSHOP,
+    start_time=datetime.now() + timedelta(days=7),
+    end_time=datetime.now() + timedelta(days=7, hours=2),
+    visibility=EventVisibility.PUBLIC
+)
+```
+
+## Module Attributes
+
+Attributes:
+    ClubRole (Enum): Hierarchical roles (Owner > Admin > Lead > Member).
+    ClubCategory (Enum): Classification for discovery (Tech, Sports, Arts, etc.).
+    UniversityStatus (Enum): Verification state of a university.
 """
 
 from datetime import datetime, timezone
@@ -13,7 +72,15 @@ import re
 
 
 class ClubRole(str, Enum):
-    """Club member roles with hierarchical permissions."""
+    """
+    Enumeration of club member roles with hierarchical permissions.
+
+    **Hierarchy:**
+    *   **OWNER**: Full control, including deletion and transfer of ownership.
+    *   **ADMIN**: Can manage members, events, and settings.
+    *   **LEAD**: Manages a specific vertical (sub-team).
+    *   **MEMBER**: Standard participation rights.
+    """
     OWNER = "owner"
     ADMIN = "admin"
     LEAD = "lead"
@@ -21,7 +88,11 @@ class ClubRole(str, Enum):
 
 
 class ClubCategory(str, Enum):
-    """Club categories for organization and discovery."""
+    """
+    Enumeration of club categories for organization and discovery.
+
+    Used to filter clubs in the directory.
+    """
     TECH = "tech"
     CULTURAL = "cultural"
     SPORTS = "sports"
@@ -34,7 +105,13 @@ class ClubCategory(str, Enum):
 
 
 class UniversityStatus(str, Enum):
-    """University verification status."""
+    """
+    Enumeration of university verification statuses.
+
+    *   **PENDING**: Submitted but not yet verified.
+    *   **VERIFIED**: Domain confirmed and admin approved.
+    *   **REJECTED**: Denied by admin.
+    """
     PENDING = "pending"
     VERIFIED = "verified"
     REJECTED = "rejected"
@@ -43,7 +120,17 @@ class UniversityStatus(str, Enum):
 # Document Models (for MongoDB)
 
 class UniversityDocument(BaseModel):
-    """University/Institution document model."""
+    """
+    MongoDB document model for a University/Institution.
+
+    Represents the root entity in the club hierarchy. Universities are verified
+    by their email domain (e.g., `@stanford.edu`) to ensure authenticity.
+
+    **Key Fields:**
+    *   **domain**: The primary email domain used for verification.
+    *   **is_verified**: True if the domain has been confirmed via DNS or admin.
+    *   **admin_approved**: True if a platform admin has manually approved the university.
+    """
     university_id: str = Field(..., description="Unique university identifier")
     name: str = Field(..., min_length=2, max_length=200, description="University name")
     domain: str = Field(..., description="Primary domain (e.g., university.edu)")
@@ -84,7 +171,17 @@ class UniversityDocument(BaseModel):
 
 
 class ClubDocument(BaseModel):
-    """Club document model."""
+    """
+    MongoDB document model for a Student Club.
+
+    Clubs are organizations under a university. They can have multiple 'verticals'
+    (sub-teams) and members with different roles.
+
+    **Key Fields:**
+    *   **slug**: URL-friendly identifier (e.g., 'ai-society'). Auto-generated from name.
+    *   **university_id**: Reference to the parent university.
+    *   **owner_id**: The user who has full control over the club.
+    """
     club_id: str = Field(..., description="Unique club identifier")
     name: str = Field(..., min_length=2, max_length=100, description="Club name")
     slug: str = Field(..., description="URL-friendly slug")
@@ -130,7 +227,16 @@ class ClubDocument(BaseModel):
 
 
 class VerticalDocument(BaseModel):
-    """Club vertical/team document model."""
+    """
+    MongoDB document model for a Club Vertical (Sub-team).
+
+    Verticals are specialized groups within a club (e.g., "Marketing Team", "Drone Project").
+    They allow for more granular organization and leadership roles.
+
+    **Key Fields:**
+    *   **lead_id**: The user responsible for this specific vertical.
+    *   **color/icon**: Visual identifiers for UI customization.
+    """
     vertical_id: str = Field(..., description="Unique vertical identifier")
     club_id: str = Field(..., description="Parent club ID")
     name: str = Field(..., min_length=2, max_length=50, description="Vertical name")
@@ -146,7 +252,16 @@ class VerticalDocument(BaseModel):
 
 
 class ClubMemberDocument(BaseModel):
-    """Club membership document model."""
+    """
+    MongoDB document model for a Club Membership.
+
+    Links a User to a Club with a specific Role. Can also optionally link to a Vertical.
+
+    **Key Fields:**
+    *   **role**: The permission level (Owner, Admin, Lead, Member).
+    *   **joined_at**: Timestamp when the invitation was accepted.
+    *   **is_alumni**: Flag for former members who want to stay connected.
+    """
     member_id: str = Field(..., description="Unique membership identifier")
     club_id: str = Field(..., description="Club ID")
     user_id: str = Field(..., description="User ID")
@@ -174,17 +289,25 @@ class ClubMemberDocument(BaseModel):
 # Request/Response Models (for API)
 
 class CreateUniversityRequest(BaseModel):
-    """Request model for creating a university."""
-    name: str = Field(..., min_length=2, max_length=200)
-    domain: str = Field(...)
-    description: Optional[str] = Field(None, max_length=1000)
-    location: Optional[str] = Field(None, max_length=200)
-    website: Optional[str] = Field(None)
-    logo_url: Optional[str] = Field(None)
+    """
+    Request model for registering a new university.
+
+    Requires a valid domain for verification.
+    """
+    name: str = Field(..., min_length=2, max_length=200, description="Official name of the university")
+    domain: str = Field(..., description="Primary email domain (e.g., stanford.edu)")
+    description: Optional[str] = Field(None, max_length=1000, description="Brief description")
+    location: Optional[str] = Field(None, max_length=200, description="City, Country")
+    website: Optional[str] = Field(None, description="Official website URL")
+    logo_url: Optional[str] = Field(None, description="URL to university logo")
 
 
 class UniversityResponse(BaseModel):
-    """Response model for university data."""
+    """
+    Response model for university details.
+
+    Includes verification status and aggregate statistics.
+    """
     university_id: str
     name: str
     domain: str
@@ -202,21 +325,31 @@ class UniversityResponse(BaseModel):
 
 
 class CreateClubRequest(BaseModel):
-    """Request model for creating a club."""
-    name: str = Field(..., min_length=2, max_length=100)
-    description: Optional[str] = Field(None, max_length=1000)
-    category: ClubCategory = Field(...)
-    university_id: str = Field(...)
-    logo_url: Optional[str] = Field(None)
-    banner_url: Optional[str] = Field(None)
-    website_url: Optional[str] = Field(None)
-    social_links: Dict[str, str] = Field(default_factory=dict)
-    max_members: Optional[int] = Field(None, gt=0, le=10000)
-    tags: List[str] = Field(default_factory=list)
+    """
+    Request model for creating a new student club.
+
+    **Validation:**
+    *   **name**: 2-100 characters.
+    *   **max_members**: Optional limit (1-10000).
+    """
+    name: str = Field(..., min_length=2, max_length=100, description="Club name")
+    description: Optional[str] = Field(None, max_length=1000, description="Club mission/description")
+    category: ClubCategory = Field(..., description="Primary category")
+    university_id: str = Field(..., description="ID of the university this club belongs to")
+    logo_url: Optional[str] = Field(None, description="Club logo URL")
+    banner_url: Optional[str] = Field(None, description="Club banner URL")
+    website_url: Optional[str] = Field(None, description="External website URL")
+    social_links: Dict[str, str] = Field(default_factory=dict, description="Map of platform -> URL")
+    max_members: Optional[int] = Field(None, gt=0, le=10000, description="Optional member cap")
+    tags: List[str] = Field(default_factory=list, description="Search tags")
 
 
 class ClubResponse(BaseModel):
-    """Response model for club data."""
+    """
+    Response model for club details.
+
+    Includes public metadata and member counts.
+    """
     club_id: str
     name: str
     slug: str
@@ -239,17 +372,23 @@ class ClubResponse(BaseModel):
 
 
 class CreateVerticalRequest(BaseModel):
-    """Request model for creating a vertical."""
-    name: str = Field(..., min_length=2, max_length=50)
-    description: Optional[str] = Field(None, max_length=500)
-    lead_id: Optional[str] = Field(None)
-    max_members: Optional[int] = Field(None, gt=0, le=1000)
-    color: Optional[str] = Field(None)
-    icon: Optional[str] = Field(None)
+    """
+    Request model for creating a new vertical (sub-team).
+
+    Verticals help organize large clubs into smaller, manageable groups.
+    """
+    name: str = Field(..., min_length=2, max_length=50, description="Vertical name")
+    description: Optional[str] = Field(None, max_length=500, description="Purpose of the vertical")
+    lead_id: Optional[str] = Field(None, description="User ID of the vertical lead")
+    max_members: Optional[int] = Field(None, gt=0, le=1000, description="Optional member cap")
+    color: Optional[str] = Field(None, description="Hex color code for UI")
+    icon: Optional[str] = Field(None, description="Icon identifier")
 
 
 class VerticalResponse(BaseModel):
-    """Response model for vertical data."""
+    """
+    Response model for vertical details.
+    """
     vertical_id: str
     club_id: str
     name: str
@@ -265,7 +404,13 @@ class VerticalResponse(BaseModel):
 
 
 class InviteMemberRequest(BaseModel):
-    """Request model for inviting a member."""
+    """
+    Request model for inviting a user to a club.
+
+    **Fields:**
+    *   **role**: The role to assign upon joining.
+    *   **vertical_id**: Optional assignment to a specific sub-team.
+    """
     user_id: str = Field(..., description="User ID to invite")
     role: ClubRole = Field(..., description="Role to assign")
     vertical_id: Optional[str] = Field(None, description="Vertical to assign")
@@ -273,7 +418,11 @@ class InviteMemberRequest(BaseModel):
 
 
 class ClubMemberResponse(BaseModel):
-    """Response model for club member data."""
+    """
+    Response model for club member details.
+
+    Includes role, vertical assignment, and activity metrics.
+    """
     member_id: str
     club_id: str
     user_id: str
@@ -291,7 +440,11 @@ class ClubMemberResponse(BaseModel):
 
 
 class ClubSearchRequest(BaseModel):
-    """Request model for club search."""
+    """
+    Request model for searching clubs.
+
+    Supports filtering by category, university, and tags.
+    """
     query: Optional[str] = Field(None, description="Search query")
     category: Optional[ClubCategory] = Field(None, description="Filter by category")
     university_id: Optional[str] = Field(None, description="Filter by university")
@@ -301,35 +454,53 @@ class ClubSearchRequest(BaseModel):
 
 
 class ClubAnalyticsResponse(BaseModel):
-    """Response model for club analytics."""
+    """
+    Response model for club analytics.
+
+    Provides insights into member growth and engagement.
+    """
     club_id: str
-    member_growth: List[Dict[str, Any]] = Field(default_factory=list)
-    vertical_participation: Dict[str, int] = Field(default_factory=dict)
-    activity_metrics: Dict[str, Any] = Field(default_factory=dict)
-    engagement_score: float = Field(default=0.0)
+    member_growth: List[Dict[str, Any]] = Field(default_factory=list, description="Time-series data of member count")
+    vertical_participation: Dict[str, int] = Field(default_factory=dict, description="Member count per vertical")
+    activity_metrics: Dict[str, Any] = Field(default_factory=dict, description="Event attendance and contribution stats")
+    engagement_score: float = Field(default=0.0, description="Calculated engagement score (0-100)")
 
 
 class BulkInviteRequest(BaseModel):
-    """Request model for bulk member invitation."""
-    invites: List[InviteMemberRequest] = Field(..., min_length=1, max_length=50)
+    """
+    Request model for bulk member invitation.
+
+    Allows inviting up to 50 members at once.
+    """
+    invites: List[InviteMemberRequest] = Field(..., min_length=1, max_length=50, description="List of invitations")
 
 
 class TransferMemberRequest(BaseModel):
-    """Request model for transferring member between verticals."""
-    member_id: str = Field(...)
-    vertical_id: Optional[str] = Field(None, description="New vertical ID, null to remove")
+    """
+    Request model for transferring a member between verticals.
+    """
+    member_id: str = Field(..., description="ID of the member to transfer")
+    vertical_id: Optional[str] = Field(None, description="New vertical ID, null to remove from current vertical")
 
 
 class UpdateMemberRoleRequest(BaseModel):
-    """Request model for updating member role."""
-    role: ClubRole = Field(...)
-    vertical_id: Optional[str] = Field(None, description="Optional vertical assignment")
+    """
+    Request model for updating a member's role.
+
+    Used for promotions (e.g., Member -> Lead) or demotions.
+    """
+    role: ClubRole = Field(..., description="New role")
+    vertical_id: Optional[str] = Field(None, description="Optional vertical assignment (required for LEAD role)")
 
 
 # Event Models
 
 class EventType(str, Enum):
-    """Types of club events."""
+    """
+    Enumeration of event types for classification.
+
+    Helps users filter events based on their interests.
+    """
     MEETING = "meeting"
     WORKSHOP = "workshop"
     SOCIAL = "social"
@@ -340,7 +511,14 @@ class EventType(str, Enum):
 
 
 class EventStatus(str, Enum):
-    """Event status states."""
+    """
+    Enumeration of event lifecycle states.
+
+    *   **DRAFT**: Only visible to organizers.
+    *   **PUBLISHED**: Visible to the target audience.
+    *   **CANCELLED**: Event called off.
+    *   **COMPLETED**: Event finished (archived).
+    """
     DRAFT = "draft"
     PUBLISHED = "published"
     CANCELLED = "cancelled"
@@ -348,14 +526,30 @@ class EventStatus(str, Enum):
 
 
 class EventVisibility(str, Enum):
-    """Event visibility settings."""
+    """
+    Enumeration of event visibility levels.
+
+    *   **PUBLIC**: Visible to anyone on the platform.
+    *   **MEMBERS_ONLY**: Restricted to club members.
+    *   **INVITE_ONLY**: Private, requires direct invitation.
+    """
     PUBLIC = "public"
     MEMBERS_ONLY = "members_only"
     INVITE_ONLY = "invite_only"
 
 
 class EventDocument(BaseModel):
-    """Club event document model."""
+    """
+    MongoDB document model for a Club Event.
+
+    Events are the core activity unit of clubs. They can be physical, virtual (WebRTC),
+    or hybrid. Supports recurring schedules and rich metadata.
+
+    **Key Fields:**
+    *   **visibility**: Controls who can see and register for the event.
+    *   **recurrence_rule**: RRULE string for repeating events (e.g., "FREQ=WEEKLY").
+    *   **webrtc_room_id**: If present, enables the "Join Virtual Room" button.
+    """
     event_id: str = Field(..., description="Unique event identifier")
     club_id: str = Field(..., description="Parent club ID")
     title: str = Field(..., min_length=3, max_length=200, description="Event title")
@@ -393,7 +587,15 @@ class EventDocument(BaseModel):
 
 
 class EventAttendeeDocument(BaseModel):
-    """Event attendee document model."""
+    """
+    MongoDB document model for Event Attendance.
+
+    Tracks a user's registration and participation in an event.
+
+    **Key Fields:**
+    *   **status**: 'registered', 'waitlisted', 'cancelled', 'attended'.
+    *   **attended_at**: Timestamp when the user checked in.
+    """
     attendee_id: str = Field(..., description="Unique attendee identifier")
     event_id: str = Field(..., description="Event ID")
     user_id: str = Field(..., description="Attendee user ID")
@@ -408,24 +610,30 @@ class EventAttendeeDocument(BaseModel):
 # Event Request/Response Models
 
 class CreateEventRequest(BaseModel):
-    """Request model for creating an event."""
-    title: str = Field(..., min_length=3, max_length=200)
-    description: Optional[str] = Field(None, max_length=2000)
-    event_type: EventType = Field(...)
-    visibility: EventVisibility = Field(default=EventVisibility.MEMBERS_ONLY)
-    start_time: datetime = Field(...)
-    end_time: datetime = Field(...)
-    timezone: str = Field(default="UTC")
-    location: Optional[str] = Field(None, max_length=500)
-    virtual_link: Optional[str] = Field(None)
-    max_attendees: Optional[int] = Field(None, gt=0)
-    co_organizers: List[str] = Field(default_factory=list)
-    tags: List[str] = Field(default_factory=list)
-    image_url: Optional[str] = Field(None)
-    agenda: List[Dict[str, Any]] = Field(default_factory=list)
-    requirements: List[str] = Field(default_factory=list)
-    is_recurring: bool = Field(default=False)
-    recurrence_rule: Optional[str] = Field(None)
+    """
+    Request model for creating a new event.
+
+    **Validation:**
+    *   **end_time**: Must be strictly after `start_time`.
+    *   **title**: 3-200 characters.
+    """
+    title: str = Field(..., min_length=3, max_length=200, description="Event title")
+    description: Optional[str] = Field(None, max_length=2000, description="Detailed description")
+    event_type: EventType = Field(..., description="Type of event")
+    visibility: EventVisibility = Field(default=EventVisibility.MEMBERS_ONLY, description="Who can see this")
+    start_time: datetime = Field(..., description="Start timestamp")
+    end_time: datetime = Field(..., description="End timestamp")
+    timezone: str = Field(default="UTC", description="Timezone identifier")
+    location: Optional[str] = Field(None, max_length=500, description="Physical location")
+    virtual_link: Optional[str] = Field(None, description="URL for virtual meeting")
+    max_attendees: Optional[int] = Field(None, gt=0, description="Capacity limit")
+    co_organizers: List[str] = Field(default_factory=list, description="IDs of co-hosts")
+    tags: List[str] = Field(default_factory=list, description="Search tags")
+    image_url: Optional[str] = Field(None, description="Banner image URL")
+    agenda: List[Dict[str, Any]] = Field(default_factory=list, description="Schedule items")
+    requirements: List[str] = Field(default_factory=list, description="Prerequisites")
+    is_recurring: bool = Field(default=False, description="Is this a repeating event?")
+    recurrence_rule: Optional[str] = Field(None, description="RRULE string")
 
     @model_validator(mode='after')
     def validate_times(self):
@@ -436,7 +644,11 @@ class CreateEventRequest(BaseModel):
 
 
 class EventResponse(BaseModel):
-    """Response model for event data."""
+    """
+    Response model for event details.
+
+    Includes all metadata required to render the event page.
+    """
     event_id: str
     club_id: str
     title: str
@@ -466,27 +678,33 @@ class EventResponse(BaseModel):
 
 
 class UpdateEventRequest(BaseModel):
-    """Request model for updating an event."""
-    title: Optional[str] = Field(None, min_length=3, max_length=200)
-    description: Optional[str] = Field(None, max_length=2000)
-    event_type: Optional[EventType] = Field(None)
-    visibility: Optional[EventVisibility] = Field(None)
-    start_time: Optional[datetime] = Field(None)
-    end_time: Optional[datetime] = Field(None)
-    timezone: Optional[str] = Field(None)
-    location: Optional[str] = Field(None, max_length=500)
-    virtual_link: Optional[str] = Field(None)
-    max_attendees: Optional[int] = Field(None, gt=0)
-    co_organizers: Optional[List[str]] = Field(None)
-    tags: Optional[List[str]] = Field(None)
-    image_url: Optional[str] = Field(None)
-    agenda: Optional[List[Dict[str, Any]]] = Field(None)
-    requirements: Optional[List[str]] = Field(None)
-    status: Optional[EventStatus] = Field(None)
+    """
+    Request model for updating an existing event.
+
+    All fields are optional; only provided fields will be updated.
+    """
+    title: Optional[str] = Field(None, min_length=3, max_length=200, description="Updated title")
+    description: Optional[str] = Field(None, max_length=2000, description="Updated description")
+    event_type: Optional[EventType] = Field(None, description="Updated type")
+    visibility: Optional[EventVisibility] = Field(None, description="Updated visibility")
+    start_time: Optional[datetime] = Field(None, description="Updated start time")
+    end_time: Optional[datetime] = Field(None, description="Updated end time")
+    timezone: Optional[str] = Field(None, description="Updated timezone")
+    location: Optional[str] = Field(None, max_length=500, description="Updated location")
+    virtual_link: Optional[str] = Field(None, description="Updated virtual link")
+    max_attendees: Optional[int] = Field(None, gt=0, description="Updated capacity")
+    co_organizers: Optional[List[str]] = Field(None, description="Updated co-organizers")
+    tags: Optional[List[str]] = Field(None, description="Updated tags")
+    image_url: Optional[str] = Field(None, description="Updated image URL")
+    agenda: Optional[List[Dict[str, Any]]] = Field(None, description="Updated agenda")
+    requirements: Optional[List[str]] = Field(None, description="Updated requirements")
+    status: Optional[EventStatus] = Field(None, description="Updated status (e.g., CANCELLED)")
 
 
 class EventAttendeeResponse(BaseModel):
-    """Response model for event attendee data."""
+    """
+    Response model for event attendee details.
+    """
     attendee_id: str
     event_id: str
     user_id: str
@@ -497,12 +715,18 @@ class EventAttendeeResponse(BaseModel):
 
 
 class RegisterForEventRequest(BaseModel):
-    """Request model for registering for an event."""
-    notes: Optional[str] = Field(None, max_length=500)
+    """
+    Request model for registering for an event.
+    """
+    notes: Optional[str] = Field(None, max_length=500, description="Optional notes for organizer")
 
 
 class EventSearchRequest(BaseModel):
-    """Request model for event search."""
+    """
+    Request model for searching events.
+
+    Supports filtering by date range, type, and organizer.
+    """
     query: Optional[str] = Field(None, description="Search query")
     event_type: Optional[EventType] = Field(None, description="Filter by event type")
     status: Optional[EventStatus] = Field(None, description="Filter by status")

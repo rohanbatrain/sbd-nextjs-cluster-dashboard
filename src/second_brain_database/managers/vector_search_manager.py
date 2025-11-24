@@ -37,7 +37,52 @@ logger = get_logger(prefix="[VectorSearchManager]")
 
 
 class VectorSearchManager:
-    """Professional vector search manager for document embeddings and semantic search."""
+    """
+    Professional vector search manager for document embeddings and semantic search.
+
+    Provides production-ready vector search implementation using Qdrant for document
+    embeddings and semantic similarity search with sentence transformers.
+
+    **Core Features:**
+    - **Qdrant integration**: Vector database for embeddings storage
+    - **Sentence transformers**: High-quality embedding generation
+    - **Semantic search**: Similarity-based document retrieval
+    - **Batch processing**: Efficient bulk embedding generation
+    - **Collection management**: Automatic collection creation and configuration
+
+    **Embedding Generation:**
+    - Sentence transformer models (configurable)
+    - Batch processing for efficiency
+    - Background model loading (non-blocking initialization)
+    - CPU/GPU device selection
+    - Configurable embedding dimensions
+
+    **Search Capabilities:**
+    - Semantic vector search with score thresholds
+    - User and tenant filtering
+    - Configurable result limits
+    - Metadata inclusion options
+    - Distance metric selection (Cosine, Euclidean, Dot)
+
+    **Document Indexing:**
+    - Chunk-based document indexing
+    - Metadata preservation
+    - Multi-tenancy support
+    - Batch upsert optimization
+    - UUID-based point IDs
+
+    **Text Chunking:**
+    - Sentence-based semantic chunking
+    - Configurable chunk size and overlap
+    - Maintains context across chunks
+
+    **Configuration:**
+    - Qdrant host, port, HTTPS, API key
+    - Embedding model selection
+    - Vector dimensions and distance metric
+    - Indexing threshold and batch size
+    - Search limits and score thresholds
+    """
 
     def __init__(self):
         """Initialize the vector search manager with Qdrant and embedding model."""

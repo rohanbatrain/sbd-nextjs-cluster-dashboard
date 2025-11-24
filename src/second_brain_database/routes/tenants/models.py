@@ -1,5 +1,34 @@
 """
-Tenant management models for multi-tenancy support.
+# Tenant Models
+
+This module defines the **data structures** for the Multi-Tenancy System.
+It handles tenant configuration, membership roles, and subscription plans.
+
+## Domain Overview
+
+Tenants act as isolated containers for resources (users, data, settings).
+- **Plans**: `FREE`, `PRO`, `ENTERPRISE` with varying resource limits.
+- **Roles**: `OWNER`, `ADMIN`, `MEMBER`, `GUEST` for granular access control.
+
+## Key Models
+
+### 1. Tenant Configuration
+- **TenantResponse**: Public details (name, slug, plan).
+- **CreateTenantRequest**: Input for provisioning a new tenant.
+
+### 2. Membership
+- **TenantMembership**: Links a user to a tenant with a specific role.
+- **TenantMemberResponse**: Details of a user within a tenant context.
+
+## Usage Example
+
+```python
+membership = TenantMembership(
+    tenant_id="tenant_123",
+    role=TenantMemberRole.ADMIN,
+    joined_at=datetime.utcnow()
+)
+```
 """
 
 from datetime import datetime

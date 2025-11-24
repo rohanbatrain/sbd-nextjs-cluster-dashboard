@@ -32,10 +32,28 @@ logger = get_logger(prefix="[BlogManager]")
 
 class BlogWebsiteManager:
     """
-    Manager for blog website operations with multi-tenant isolation.
+    Manages blog websites with multi-tenant isolation and role-based access control.
 
-    Handles website creation, configuration, member management, and
-    website-level permissions.
+    Provides complete website lifecycle management for the blog platform including
+    creation, configuration, member management, and permissions.
+
+    **Features:**
+    - **Website creation**: Unique slug validation, default categories
+    - **Member management**: Role-based invitations (Owner, Admin, Editor, Author, Viewer)
+    - **Access control**: Hierarchical role permissions
+    - **Caching**: Redis-based website and slug caching
+    - **Multi-tenancy**: Website-level data isolation
+
+    **Roles Hierarchy:**
+    - **Owner**: Full control, can delete website
+    - **Admin**: Manage members, settings
+    - **Editor**: Publish/edit all posts
+    - **Author**: Create/edit own posts
+    - **Viewer**: Read-only access
+
+    **Collections:**
+    - `blog_websites`: Website metadata and settings
+    - `blog_website_members`: Member roles and permissions
     """
 
     def __init__(self, db_manager=None, redis_manager=None):
@@ -230,9 +248,29 @@ class BlogWebsiteManager:
 
 class BlogContentService:
     """
-    Service for blog content operations with website isolation.
+    Manages blog content (posts, categories, comments) with website-level isolation.
 
-    Handles posts, categories, and comments within specific websites.
+    Provides content creation, retrieval, and management within specific blog websites,
+    ensuring data isolation and proper access control.
+
+    **Features:**
+    - **Post management**: Create, update, publish, draft posts
+    - **Slug generation**: Automatic URL-friendly slugs with uniqueness
+    - **SEO optimization**: Reading time, word count, meta tags
+    - **Caching**: Redis-based post caching by slug
+    - **Analytics**: View count tracking
+    - **Categories**: Multi-category support per post
+
+    **Post Lifecycle:**
+    1. Draft → Author creates post
+    2. Review → Editor reviews
+    3. Published → Visible to public
+    4. Archived → Hidden but preserved
+
+    **Collections:**
+    - `blog_posts`: Post content and metadata
+    - `blog_categories`: Category definitions
+    - `blog_comments`: User comments on posts
     """
 
     def __init__(self, db_manager=None, redis_manager=None, website_manager=None):
@@ -406,9 +444,22 @@ class BlogContentService:
 
 class BlogSEOService:
     """
-    Service for SEO-related blog operations.
+    Provides SEO optimization services for blog content.
 
-    Handles meta tags, sitemaps, RSS feeds, and search optimization.
+    Generates SEO meta tags, sitemaps, and structured data to improve
+    search engine visibility and social media sharing.
+
+    **Features:**
+    - **Meta tag generation**: Title, description, keywords
+    - **Open Graph**: Facebook/LinkedIn sharing optimization
+    - **Twitter Cards**: Twitter sharing optimization
+    - **XML Sitemaps**: Search engine crawlability
+    - **Structured data**: Schema.org markup (future)
+
+    **Meta Tags Generated:**
+    - `title`, `description`, `keywords`
+    - `og:title`, `og:description`, `og:image`, `og:type`
+    - `twitter:card`, `twitter:title`, `twitter:description`, `twitter:image`
     """
 
     def __init__(self, db_manager=None):
@@ -488,9 +539,24 @@ class BlogSEOService:
 
 class BlogAnalyticsService:
     """
-    Service for blog analytics and tracking.
+    Tracks and aggregates blog analytics for insights and reporting.
 
-    Handles view tracking, engagement metrics, and analytics aggregation.
+    Provides comprehensive analytics including views, engagement, and user behavior
+    with duplicate detection and time-series aggregation.
+
+    **Metrics Tracked:**
+    - **Views**: Total and unique views per post/website
+    - **Engagement**: Likes, comments, shares
+    - **Time-series**: Daily/monthly aggregations
+    - **User behavior**: Reading time, scroll depth (future)
+
+    **Duplicate Prevention:**
+    - Uses Redis to track unique views per IP/post/day
+    - 24-hour deduplication window
+
+    **Collections:**
+    - `blog_analytics`: Time-series analytics data
+    - Aggregates by date for efficient querying
     """
 
     def __init__(self, db_manager=None, redis_manager=None):

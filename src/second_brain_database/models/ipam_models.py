@@ -1,8 +1,65 @@
 """
-Pydantic models for IPAM (IP Address Management) system.
+# IP Address Management (IPAM) Models
 
-This module contains all request/response models, validation schemas,
-and data transfer objects for the hierarchical IP allocation functionality.
+This module defines the **core data structures** for the IPAM system, managing the hierarchical
+allocation of IP addresses across continents, countries, regions, and hosts. It enforces strict
+validation rules for IP formats, hostname conventions, and quota limits.
+
+## Domain Model Overview
+
+The IPAM system uses a geographic hierarchy for IP allocation:
+
+1.  **Continent**: Top-level grouping (e.g., North America).
+2.  **Country**: Second-level grouping (e.g., USA). Mapped to specific X-octet ranges.
+3.  **Region**: User-defined logical grouping (e.g., "US-East-Prod"). Assigned a unique Y-octet.
+4.  **Host**: Individual device (e.g., "web-server-01"). Assigned a unique Z-octet (1-254).
+
+## Key Features
+
+### 1. Hierarchical Addressing
+- **Structure**: `10.X.Y.Z` (Private Class A network).
+- **X-Octet**: Country code (mapped via `ContinentCountryMapping`).
+- **Y-Octet**: Region ID (unique per user/country).
+- **Z-Octet**: Host ID (unique per region).
+
+### 2. Validation Rules
+- **Hostnames**: RFC 1123 compliant (alphanumeric, hyphens, dots).
+- **Tags**: Key-value pairs for flexible resource organization.
+- **Quotas**: Limits on the number of regions and hosts per user.
+
+### 3. Audit & History
+- **Audit Trails**: Full history of changes for every resource (`AuditHistoryEntry`).
+- **Snapshots**: State capture at the time of modification.
+
+## Usage Examples
+
+### Creating a Region
+
+```python
+region = RegionCreateRequest(
+    country="USA",
+    region_name="production-cluster",
+    description="Main production environment",
+    tags={"env": "prod", "team": "backend"}
+)
+```
+
+### Allocating a Host
+
+```python
+host = HostCreateRequest(
+    region_id="region_123",
+    hostname="api-gateway-01",
+    device_type="Container",
+    os_type="Linux"
+)
+```
+
+## Module Attributes
+
+Attributes:
+    VALID_STATUSES (List[str]): Lifecycle states for resources (Active, Reserved, Retired).
+    VALID_DEVICE_TYPES (List[str]): Categorization for hosts (VM, Container, Physical, etc.).
 """
 
 from datetime import datetime
@@ -19,7 +76,16 @@ TAG_KEY_PATTERN = r"^[a-zA-Z0-9_-]+$"
 
 # Request Models - Region Management
 class RegionCreateRequest(BaseModel):
-    """Request model for creating a new region allocation."""
+    """
+    Request model for creating a new region allocation.
+
+    A region represents a logical grouping of hosts within a specific country.
+    It is assigned a unique Y-octet (0-255) within the country's X-octet range.
+
+    **Validation:**
+    *   **country**: Must be a valid country name (case-insensitive).
+    *   **region_name**: 2-100 chars, alphanumeric + hyphens/dots. No special chars.
+    """
 
     country: str = Field(..., min_length=2, max_length=100, description="Country name for region allocation")
     region_name: str = Field(..., min_length=2, max_length=100, description="User-defined region name")
@@ -60,7 +126,15 @@ class RegionCreateRequest(BaseModel):
 
 
 class RegionUpdateRequest(BaseModel):
-    """Request model for updating an existing region."""
+    """
+    Request model for updating an existing region.
+
+    Allows modification of metadata (name, description, owner, tags) and status.
+    Changing the `region_name` does NOT change the underlying IP allocation.
+
+    **Fields:**
+    *   **status**: Can be set to 'Active', 'Reserved', or 'Retired'.
+    """
 
     region_name: Optional[str] = Field(None, min_length=2, max_length=100, description="Updated region name")
     description: Optional[str] = Field(None, max_length=500, description="Updated description")
@@ -89,7 +163,15 @@ class RegionUpdateRequest(BaseModel):
 
 # Request Models - Host Management
 class HostCreateRequest(BaseModel):
-    """Request model for creating a new host allocation."""
+    """
+    Request model for creating a new host allocation.
+
+    A host represents a single IP address (Z-octet) within a region.
+
+    **Validation:**
+    *   **hostname**: RFC 1123 compliant (alphanumeric, hyphens, dots). Max 253 chars.
+    *   **device_type**: Must be one of `VALID_DEVICE_TYPES`.
+    """
 
     region_id: str = Field(..., description="Region ID where host will be allocated")
     hostname: str = Field(..., min_length=1, max_length=253, description="Hostname for the device")
@@ -124,7 +206,15 @@ class HostCreateRequest(BaseModel):
 
 
 class HostUpdateRequest(BaseModel):
-    """Request model for updating an existing host."""
+    """
+    Request model for updating an existing host.
+
+    Allows modification of metadata and status.
+    Changing the `hostname` updates the record but does not change the IP.
+
+    **Fields:**
+    *   **status**: Lifecycle state ('Active', 'Reserved', 'Released').
+    """
 
     hostname: Optional[str] = Field(None, min_length=1, max_length=253, description="Updated hostname")
     device_type: Optional[Literal["VM", "Container", "Physical", "Network", "Storage", "Other"]] = Field(
@@ -159,7 +249,15 @@ class HostUpdateRequest(BaseModel):
 
 
 class BatchHostCreateRequest(BaseModel):
-    """Request model for batch host allocation."""
+    """
+    Request model for batch host allocation.
+
+    Allocates multiple sequential IP addresses in a single region.
+
+    **Validation:**
+    *   **count**: 1-100 hosts per request.
+    *   **hostname_prefix**: Used to generate hostnames (e.g., 'web-' -> 'web-1', 'web-2').
+    """
 
     region_id: str = Field(..., description="Region ID where hosts will be allocated")
     count: int = Field(..., ge=1, le=100, description="Number of hosts to allocate (max 100)")
@@ -185,7 +283,11 @@ class BatchHostCreateRequest(BaseModel):
 
 # Request Models - Comments
 class CommentCreateRequest(BaseModel):
-    """Request model for adding a comment to a resource."""
+    """
+    Request model for adding a comment to a resource.
+
+    Comments provide an audit trail for human decisions and context.
+    """
 
     comment_text: str = Field(..., min_length=1, max_length=2000, description="Comment text")
 
@@ -200,7 +302,14 @@ class CommentCreateRequest(BaseModel):
 
 # Request Models - Retirement and Release
 class RetireAllocationRequest(BaseModel):
-    """Request model for retiring an allocation."""
+    """
+    Request model for retiring an allocation.
+
+    Retiring a resource marks it as permanently inactive but preserves its history.
+
+    **Fields:**
+    *   **cascade**: If True (for regions), recursively retires all contained hosts.
+    """
 
     reason: str = Field(..., min_length=5, max_length=500, description="Reason for retirement")
     cascade: bool = Field(False, description="For regions: also retire all child hosts")
@@ -217,7 +326,14 @@ class RetireAllocationRequest(BaseModel):
 
 
 class BulkReleaseRequest(BaseModel):
-    """Request model for bulk host release."""
+    """
+    Request model for bulk host release.
+
+    Releasing a host returns its IP address to the available pool.
+
+    **Validation:**
+    *   **host_ids**: List of 1-100 unique host IDs.
+    """
 
     host_ids: List[str] = Field(..., min_items=1, max_items=100, description="List of host IDs to release")
     reason: str = Field(..., min_length=5, max_length=500, description="Reason for release")
@@ -245,7 +361,16 @@ class BulkReleaseRequest(BaseModel):
 
 # Request Models - Reservation
 class ReservationCreateRequest(BaseModel):
-    """Request model for creating a reservation."""
+    """
+    Request model for creating a manual reservation.
+
+    Reservations hold specific IP addresses or ranges, preventing automatic allocation.
+
+    **Fields:**
+    *   **x_octet**: Country code.
+    *   **y_octet**: Region ID.
+    *   **z_octet**: Host ID (optional for region reservations).
+    """
 
     resource_type: Literal["region", "host"] = Field(..., description="Type of resource to reserve")
     x_octet: int = Field(..., ge=0, le=255, description="X octet value")
@@ -267,7 +392,15 @@ class ReservationCreateRequest(BaseModel):
 
 # Request Models - Search and Filtering
 class SearchRequest(BaseModel):
-    """Request model for searching allocations."""
+    """
+    Request model for searching allocations.
+
+    Supports complex filtering across multiple dimensions.
+
+    **Filters:**
+    *   **cidr**: Supports standard CIDR notation (e.g., '10.1.0.0/16').
+    *   **tags**: Matches resources containing ALL specified tags (AND logic).
+    """
 
     ip_address: Optional[str] = Field(None, description="IP address for exact or partial match")
     cidr: Optional[str] = Field(None, description="CIDR range for matching")
@@ -286,7 +419,13 @@ class SearchRequest(BaseModel):
 
 # Request Models - Import/Export
 class ExportRequest(BaseModel):
-    """Request model for exporting allocations."""
+    """
+    Request model for exporting allocations.
+
+    **Formats:**
+    *   **json**: Full structural fidelity.
+    *   **csv**: Flattened list suitable for spreadsheets.
+    """
 
     format: Literal["csv", "json"] = Field("json", description="Export format")
     resource_type: Optional[Literal["regions", "hosts", "all"]] = Field("all", description="Resources to export")
@@ -295,7 +434,14 @@ class ExportRequest(BaseModel):
 
 
 class ImportRequest(BaseModel):
-    """Request model for importing allocations."""
+    """
+    Request model for importing allocations.
+
+    **Modes:**
+    *   **preview**: Validates data and returns a summary of changes without applying them.
+    *   **manual**: Applies changes but requires explicit confirmation for conflicts.
+    *   **auto**: Automatically resolves conflicts where possible.
+    """
 
     mode: Literal["auto", "manual", "preview"] = Field("preview", description="Import mode")
     force: bool = Field(False, description="Skip existing allocations without error")
@@ -303,7 +449,15 @@ class ImportRequest(BaseModel):
 
 # Response Models - Country and Mapping
 class CountryResponse(BaseModel):
-    """Response model for country information."""
+    """
+    Response model for country-level IPAM data.
+
+    Maps a physical country to its assigned X-octet range in the 10.X.Y.Z schema.
+
+    **Fields:**
+    *   **x_start** / **x_end**: The inclusive range of X-octets assigned to this country.
+    *   **utilization_percent**: Percentage of available regions (Y-octets) currently allocated.
+    """
 
     continent: str
     country: str
@@ -317,7 +471,11 @@ class CountryResponse(BaseModel):
 
 
 class ContinentCountryMapping(BaseModel):
-    """Response model for continent-country mapping."""
+    """
+    Response model for the global IPAM hierarchy.
+
+    Groups countries by continent for navigation and visualization.
+    """
 
     continent: str
     countries: List[CountryResponse]
@@ -325,7 +483,11 @@ class ContinentCountryMapping(BaseModel):
 
 # Response Models - Utilization Statistics
 class UtilizationStats(BaseModel):
-    """Response model for utilization statistics."""
+    """
+    Response model for generic resource utilization statistics.
+
+    Used for dashboards showing capacity planning metrics.
+    """
 
     total_capacity: int
     allocated: int
@@ -335,7 +497,11 @@ class UtilizationStats(BaseModel):
 
 
 class RegionUtilizationResponse(BaseModel):
-    """Response model for region utilization."""
+    """
+    Response model for region-specific utilization.
+
+    Shows how many hosts (Z-octets) are used within a specific region.
+    """
 
     region_id: str
     cidr: str
@@ -347,7 +513,11 @@ class RegionUtilizationResponse(BaseModel):
 
 
 class CountryUtilizationResponse(BaseModel):
-    """Response model for country utilization."""
+    """
+    Response model for country-specific utilization.
+
+    Shows how many regions (Y-octets) are used within a country's X-octet blocks.
+    """
 
     country: str
     continent: str
@@ -360,7 +530,9 @@ class CountryUtilizationResponse(BaseModel):
 
 # Response Models - Region
 class CommentResponse(BaseModel):
-    """Response model for a comment."""
+    """
+    Response model for a single comment on a resource.
+    """
 
     text: str
     author_id: str
@@ -368,7 +540,14 @@ class CommentResponse(BaseModel):
 
 
 class RegionResponse(BaseModel):
-    """Response model for region allocation."""
+    """
+    Response model for a full region allocation.
+
+    **Fields:**
+    *   **cidr**: The CIDR block for this region (e.g., '10.1.5.0/24').
+    *   **x_octet**: The country code part of the IP.
+    *   **y_octet**: The region ID part of the IP.
+    """
 
     region_id: str
     user_id: str
@@ -396,7 +575,13 @@ class RegionResponse(BaseModel):
 
 # Response Models - Host
 class HostResponse(BaseModel):
-    """Response model for host allocation."""
+    """
+    Response model for a full host allocation.
+
+    **Fields:**
+    *   **ip_address**: The full IPv4 address (e.g., '10.1.5.12').
+    *   **z_octet**: The host ID part of the IP (1-254).
+    """
 
     host_id: str
     user_id: str
@@ -427,7 +612,15 @@ class HostResponse(BaseModel):
 
 # Response Models - Batch Operations
 class BatchHostCreateResult(BaseModel):
-    """Response model for batch host creation."""
+    """
+    Response model for batch host creation.
+
+    Summarizes the outcome of a bulk allocation request.
+
+    **Fields:**
+    *   **hosts**: List of successfully allocated host objects.
+    *   **errors**: List of failures (e.g., if a specific IP was already taken).
+    """
 
     total_requested: int
     successful: int
@@ -437,7 +630,12 @@ class BatchHostCreateResult(BaseModel):
 
 
 class BulkReleaseResult(BaseModel):
-    """Response model for bulk host release."""
+    """
+    Response model for bulk host release.
+
+    **Fields:**
+    *   **results**: Detailed status for each requested host ID.
+    """
 
     total_requested: int
     successful: int
@@ -447,7 +645,9 @@ class BulkReleaseResult(BaseModel):
 
 # Response Models - IP Interpretation
 class HostHierarchyInfo(BaseModel):
-    """Host information in hierarchy."""
+    """
+    Simplified host info for hierarchy visualization.
+    """
 
     host_id: str
     hostname: str
@@ -457,7 +657,9 @@ class HostHierarchyInfo(BaseModel):
 
 
 class RegionHierarchyInfo(BaseModel):
-    """Region information in hierarchy."""
+    """
+    Simplified region info for hierarchy visualization.
+    """
 
     region_id: str
     region_name: str
@@ -467,7 +669,9 @@ class RegionHierarchyInfo(BaseModel):
 
 
 class CountryHierarchyInfo(BaseModel):
-    """Country information in hierarchy."""
+    """
+    Simplified country info for hierarchy visualization.
+    """
 
     name: str
     x_range: str
@@ -475,7 +679,11 @@ class CountryHierarchyInfo(BaseModel):
 
 
 class IPHierarchyResponse(BaseModel):
-    """Response model for IP address interpretation."""
+    """
+    Response model for IP address interpretation.
+
+    Given an IP, returns its place in the hierarchy (Country -> Region -> Host).
+    """
 
     ip_address: str
     hierarchy: Dict[str, Any]
@@ -483,7 +691,9 @@ class IPHierarchyResponse(BaseModel):
 
 # Response Models - Validation
 class ValidationResult(BaseModel):
-    """Response model for validation results."""
+    """
+    Response model for generic validation checks.
+    """
 
     valid: bool
     errors: List[str] = []
@@ -491,7 +701,13 @@ class ValidationResult(BaseModel):
 
 
 class ImportValidationResult(BaseModel):
-    """Response model for import validation."""
+    """
+    Response model for import preview/validation.
+
+    **Fields:**
+    *   **valid_rows**: Count of records that can be imported safely.
+    *   **invalid_rows**: Count of records with errors.
+    """
 
     valid: bool
     total_rows: int
@@ -503,7 +719,9 @@ class ImportValidationResult(BaseModel):
 
 # Response Models - Search and Pagination
 class PaginationMetadata(BaseModel):
-    """Pagination metadata."""
+    """
+    Standard pagination metadata.
+    """
 
     page: int
     page_size: int
@@ -514,7 +732,11 @@ class PaginationMetadata(BaseModel):
 
 
 class SearchResponse(BaseModel):
-    """Response model for search results."""
+    """
+    Response model for search results.
+
+    Wraps a list of results (regions or hosts) with pagination and filter context.
+    """
 
     results: List[Dict[str, Any]]
     pagination: PaginationMetadata
@@ -523,7 +745,11 @@ class SearchResponse(BaseModel):
 
 # Response Models - Audit and History
 class AuditChangeEntry(BaseModel):
-    """Model for field-level change in audit history."""
+    """
+    Model for a field-level change in the audit history.
+
+    Captures the before and after state of a specific field.
+    """
 
     field: str
     old_value: Any
@@ -531,7 +757,15 @@ class AuditChangeEntry(BaseModel):
 
 
 class AuditHistoryEntry(BaseModel):
-    """Response model for audit history entry."""
+    """
+    Response model for a single audit history entry.
+
+    Represents an event in the lifecycle of a resource.
+
+    **Fields:**
+    *   **snapshot**: Full state of the resource at the time of this event.
+    *   **changes**: List of specific field modifications.
+    """
 
     audit_id: str
     user_id: str
@@ -548,7 +782,9 @@ class AuditHistoryEntry(BaseModel):
 
 
 class AuditHistoryResponse(BaseModel):
-    """Response model for audit history query."""
+    """
+    Response model for a paginated audit history query.
+    """
 
     entries: List[AuditHistoryEntry]
     pagination: PaginationMetadata
@@ -556,7 +792,11 @@ class AuditHistoryResponse(BaseModel):
 
 # Response Models - Quota Management
 class QuotaResponse(BaseModel):
-    """Response model for user quota information."""
+    """
+    Response model for user quota information.
+
+    Tracks usage against limits for regions and hosts.
+    """
 
     user_id: str
     region_quota: int
@@ -570,7 +810,11 @@ class QuotaResponse(BaseModel):
 
 # Response Models - Statistics and Analytics
 class AllocationVelocityResponse(BaseModel):
-    """Response model for allocation velocity metrics."""
+    """
+    Response model for allocation velocity metrics.
+
+    Measures the rate of new allocations over time to predict capacity needs.
+    """
 
     time_range: str
     allocations_per_day: float
@@ -580,7 +824,9 @@ class AllocationVelocityResponse(BaseModel):
 
 
 class TopUtilizedResource(BaseModel):
-    """Model for top utilized resource."""
+    """
+    Response model for identifying high-usage resources.
+    """
 
     resource_type: str
     resource_id: str
@@ -591,7 +837,9 @@ class TopUtilizedResource(BaseModel):
 
 
 class ContinentStatisticsResponse(BaseModel):
-    """Response model for continent statistics."""
+    """
+    Response model for aggregated continent statistics.
+    """
 
     continent: str
     total_countries: int
@@ -603,7 +851,11 @@ class ContinentStatisticsResponse(BaseModel):
 
 # Response Models - Preview
 class NextAvailablePreview(BaseModel):
-    """Response model for next available allocation preview."""
+    """
+    Response model for previewing the next available allocation.
+
+    Used by UI to suggest the next free IP/Region before creation.
+    """
 
     available: bool
     next_allocation: Optional[str] = None
@@ -612,7 +864,9 @@ class NextAvailablePreview(BaseModel):
 
 # Response Models - Export Job
 class ExportJobResponse(BaseModel):
-    """Response model for export job."""
+    """
+    Response model for asynchronous export job status.
+    """
 
     job_id: str
     status: str
@@ -625,7 +879,9 @@ class ExportJobResponse(BaseModel):
 
 # Error Response Models
 class IPAMErrorResponse(BaseModel):
-    """Error response model for IPAM operations."""
+    """
+    Standard error response model for IPAM operations.
+    """
 
     error: str
     message: str
@@ -633,7 +889,9 @@ class IPAMErrorResponse(BaseModel):
 
 
 class CapacityExhaustedError(BaseModel):
-    """Error response for capacity exhaustion."""
+    """
+    Specific error for when a range (Country or Region) is full.
+    """
 
     error: str = "capacity_exhausted"
     message: str
@@ -641,7 +899,9 @@ class CapacityExhaustedError(BaseModel):
 
 
 class QuotaExceededError(BaseModel):
-    """Error response for quota exceeded."""
+    """
+    Specific error for when a user exceeds their allocation quota.
+    """
 
     error: str = "quota_exceeded"
     message: str

@@ -1,8 +1,65 @@
 """
-Chat API routes for LangGraph-based chat system.
+# Chat Routes
 
-This module provides FastAPI routes for chat session management, message streaming,
-voting, token usage tracking, and health checks.
+This module provides the **REST API endpoints** for the LangGraph-based Chat System.
+It handles session management, message streaming, voting, and usage tracking.
+
+## Domain Overview
+
+The Chat System is the core interface for user interaction with the Second Brain.
+It supports multiple modes of operation:
+- **General Chat**: Standard conversational AI.
+- **RAG Chat**: Retrieval-Augmented Generation using user documents.
+- **SQL Chat**: (Future) Natural language database querying.
+
+## Key Features
+
+### 1. Session Management
+- **Lifecycle**: Create, list, retrieve, and update chat sessions.
+- **Context**: Maintains conversation history and state via LangGraph.
+- **Isolation**: Strict user isolation ensures privacy.
+
+### 2. Real-Time Streaming
+- **SSE (Server-Sent Events)**: Streams AI responses token-by-token.
+- **Feedback**: Supports real-time upvotes/downvotes on messages.
+
+### 3. Usage Tracking
+- **Token Accounting**: Tracks input/output tokens per session.
+- **Cost Estimation**: Calculates estimated cost based on model pricing.
+- **Rate Limiting**: Enforces limits on session creation and message frequency.
+
+## API Endpoints
+
+### Sessions
+- `POST /chat/sessions` - Create a new session
+- `GET /chat/sessions` - List user sessions
+- `GET /chat/sessions/{id}` - Get session details
+- `PATCH /chat/sessions/{id}` - Update session title
+
+### Messages
+- `POST /chat/sessions/{id}/messages` - Send message (Streaming)
+- `POST /chat/messages/{id}/vote` - Vote on message
+
+## Usage Example
+
+### Creating a Session
+
+```python
+response = await client.post("/chat/sessions", json={
+    "session_type": "VECTOR",
+    "title": "Research Project",
+    "knowledge_base_ids": ["kb_123"]
+})
+session_id = response.json()["id"]
+```
+
+### Streaming a Message
+
+```python
+async with client.stream("POST", f"/chat/sessions/{session_id}/messages", json={"content": "Hello"}) as response:
+    async for line in response.aiter_lines():
+        print(line)
+```
 """
 
 from datetime import datetime, timezone
@@ -178,22 +235,38 @@ async def create_chat_session(
     rate_limiter: ChatRateLimiter = Depends(get_rate_limiter),
 ):
     """
-    Create a new chat session.
+    Create a new chat session for the authenticated user.
+
+    Initializes a new LangGraph-powered chat session with configurable session types.
+    Sessions support **GENERAL** conversations, **VECTOR** RAG queries with knowledge bases,
+    or **SQL** query generation (coming in Phase 2).
+
+    **Features:**
+    - **Rate Limiting**: Maximum 5 sessions per hour per user
+    - **Session Types**: `GENERAL`, `VECTOR`, `SQL`
+    - **Knowledge Base Integration**: Link multiple document repositories for RAG
+    - **Automatic Statistics**: Track messages, tokens, and costs
 
     Args:
-        request: FastAPI request object
-        session_data: Session creation data (type, title, knowledge_base_ids)
-        current_user: Authenticated user from JWT
-        chat_service: ChatService instance
-        rate_limiter: Rate limiter instance
+        request: The `Request` object for rate limiting context.
+        session_data: A `ChatSessionCreate` object containing:
+            - `session_type`: Type of session (`GENERAL`, `VECTOR`, `SQL`)
+            - `title`: Optional session title
+            - `knowledge_base_ids`: List of knowledge base IDs for `VECTOR` sessions
+        current_user: The authenticated user (injected by `enforce_all_lockdowns`).
+        chat_service: The `ChatService` instance for session management.
+        rate_limiter: The `ChatRateLimiter` instance for quota enforcement.
 
     Returns:
-        ChatSessionResponse: Created session with metadata
+        A `ChatSessionResponse` with the created session details, including:
+        - Session UUID (`id`)
+        - User ID and username
+        - Session type and title
+        - Initial statistics (message_count: 0, total_tokens: 0)
+        - Timestamps (`created_at`, `updated_at`)
 
     Raises:
-        HTTPException 429: Rate limit exceeded (5 sessions per hour)
-        HTTPException 400: Invalid session data
-        HTTPException 500: Internal server error
+        HTTPException: **429** if rate limit exceeded (5 sessions/hour), **400** if invalid knowledge base ID.
     """
     request_id = setup_request_context(request, current_user)
     user_id = str(current_user["_id"])
@@ -350,22 +423,37 @@ async def list_chat_sessions(
     limit: int = Query(50, ge=1, le=100, description="Maximum number of sessions to return (max: 100)"),
 ):
     """
-    List chat sessions for the authenticated user.
+    List all chat sessions for the authenticated user with pagination.
+
+    Retrieves sessions sorted by creation time (newest first), with optional filtering
+    by **session type** and **active status**.
+
+    **Pagination:**
+    - Default: 50 sessions per page
+    - Maximum: 100 sessions per page
+    - Use `skip` and `limit` for pagination
+
+    **Filtering:**
+    - `session_type`: Filter by `GENERAL`, `VECTOR`, or `SQL`
+    - `is_active`: Show active sessions (default: `True`)
 
     Args:
-        request: FastAPI request object
-        current_user: Authenticated user from JWT
-        chat_service: ChatService instance
-        session_type: Optional filter by session type (GENERAL, VECTOR, SQL)
-        is_active: Filter by active status (default: True)
-        skip: Pagination offset
-        limit: Maximum results per page
+        request: The `Request` object for logging context.
+        current_user: The authenticated user.
+        chat_service: The `ChatService` instance.
+        session_type: Optional filter by `ChatSessionType` enum.
+        is_active: Filter by active status (default: `True`).
+        skip: Number of sessions to skip for pagination (default: `0`).
+        limit: Maximum sessions to return (max: `100`, default: `50`).
 
     Returns:
-        List[ChatSessionResponse]: List of chat sessions
+        A list of `ChatSessionResponse` objects, each containing:
+        - Session metadata (ID, type, title)
+        - Usage statistics (message count, tokens, cost)
+        - Timestamps and knowledge base associations
 
     Raises:
-        HTTPException 500: Internal server error
+        HTTPException: **500** if retrieval fails.
     """
     request_id = setup_request_context(request, current_user)
     user_id = str(current_user["_id"])
@@ -509,23 +597,37 @@ async def get_chat_session(
     statistics_manager: SessionStatisticsManager = Depends(get_statistics_manager),
 ):
     """
-    Get a specific chat session with statistics.
+    Get a specific chat session with real-time statistics.
+
+    Retrieves a session and automatically recalculates its usage statistics,
+    ensuring accurate **token counts**, **message counts**, and **cost estimates**.
+
+    **Statistics Auto-Update:**
+    - Message count recalculated from database
+    - Token usage summarized from all messages
+    - Cost estimated based on token usage (currently $0.00 for Ollama)
+    - Last message timestamp updated
+
+    **Access Control:**
+    - Users can only access their own sessions
+    - Returns **403 Forbidden** if session belongs to another user
 
     Args:
-        request: FastAPI request object
-        session_id: Session UUID
-        current_user: Authenticated user from JWT
-        chat_service: ChatService instance
-        statistics_manager: Statistics manager instance
+        request: The `Request` object for logging.
+        session_id: The UUID of the session to retrieve.
+        current_user: The authenticated user.
+        chat_service: The `ChatService` instance.
+        statistics_manager: The `SessionStatisticsManager` for stats updates.
 
     Returns:
-        ChatSessionResponse: Session with updated statistics
+        A `ChatSessionResponse` with updated statistics including:
+        - Current message count
+        - Total token consumption
+        - Estimated cost
+        - Last message timestamp
 
     Raises:
-        HTTPException 400: Invalid session ID format
-        HTTPException 404: Session not found
-        HTTPException 403: Not authorized to access session
-        HTTPException 500: Internal server error
+        HTTPException: **400** if invalid session ID format, **404** if not found, **403** if unauthorized.
     """
     request_id = setup_request_context(request, current_user)
     user_id = str(current_user["_id"])
@@ -712,23 +814,34 @@ async def update_chat_session(
     chat_service: ChatService = Depends(get_chat_service),
 ):
     """
-    Update a chat session (currently supports title updates).
+    Update a chat session's properties (currently supports title updates).
+
+    Allows users to modify session metadata, primarily the session **title**.
+    Future versions may support updating other fields like knowledge base associations.
+
+    **Title Validation:**
+    - Must be a string
+    - Maximum length: **200 characters**
+    - Automatically sanitized:
+        - Whitespace trimmed
+        - Unicode normalized (NFC)
+        - HTML escaped for safety
+
+    **Access Control:**
+    - Users can only update their own sessions
 
     Args:
-        request: FastAPI request object
-        session_id: Session UUID
-        update_data: Fields to update (e.g., {"title": "New Title"})
-        current_user: Authenticated user from JWT
-        chat_service: ChatService instance
+        request: The `Request` object for logging.
+        session_id: The UUID of the session to update.
+        update_data: A dictionary with fields to update (e.g., `{"title": "New Title"}`).
+        current_user: The authenticated user.
+        chat_service: The `ChatService` instance.
 
     Returns:
-        ChatSessionResponse: Updated session
+        The updated `ChatSessionResponse` with modified fields and new `updated_at` timestamp.
 
     Raises:
-        HTTPException 400: Invalid session ID or update data
-        HTTPException 404: Session not found
-        HTTPException 403: Not authorized to update session
-        HTTPException 500: Internal server error
+        HTTPException: **400** if invalid data, **404** if not found, **403** if unauthorized.
     """
     request_id = setup_request_context(request, current_user)
     user_id = str(current_user["_id"])
@@ -899,22 +1012,36 @@ async def delete_chat_session(
     chat_service: ChatService = Depends(get_chat_service),
 ):
     """
-    Delete a chat session and all associated messages.
+    Permanently delete a chat session and all associated data.
+
+    Performs a **cascading delete** that removes the session and all related records,
+    including messages, token usage, votes, and cached conversation history.
+
+    **Deleted Data:**
+    - Chat session record
+    - All messages (user and assistant)
+    - Token usage statistics
+    - Message votes (thumbs up/down)
+    - Conversation history cache (Redis)
+
+    **Warning:**
+    ⚠️ This operation is **irreversible**. All data will be permanently lost.
+    Consider archiving sessions instead of deleting them.
+
+    **Access Control:**
+    - Users can only delete their own sessions
 
     Args:
-        request: FastAPI request object
-        session_id: Session UUID
-        current_user: Authenticated user from JWT
-        chat_service: ChatService instance
+        request: The `Request` object for logging.
+        session_id: The UUID of the session to delete.
+        current_user: The authenticated user.
+        chat_service: The `ChatService` instance.
 
     Returns:
-        204 No Content on success
+        **204 No Content** on successful deletion.
 
     Raises:
-        HTTPException 400: Invalid session ID format
-        HTTPException 404: Session not found
-        HTTPException 403: Not authorized to delete session
-        HTTPException 500: Internal server error
+        HTTPException: **400** if invalid session ID, **404** if not found, **403** if unauthorized.
     """
     request_id = setup_request_context(request, current_user)
     user_id = str(current_user["_id"])
@@ -1121,32 +1248,60 @@ async def create_chat_message(
     rate_limiter: ChatRateLimiter = Depends(get_rate_limiter),
 ):
     """
-    Send a message to a chat session and receive streaming response.
+    Send a message to a chat session and receive a streaming AI response.
 
-    This endpoint returns a streaming response in AI SDK Data Stream Protocol format.
-    The stream includes:
-    - Text tokens (0: prefix)
-    - Metadata like message_id (2: prefix)
-    - Progress indicators (g: prefix)
-    - Completion/error markers (e: prefix)
+    This endpoint implements **real-time streaming** using the AI SDK Data Stream Protocol,
+    enabling progressive display of AI responses in client applications.
+
+    **Streaming Protocol (AI SDK):**
+    The stream uses prefixed lines for different message types:
+    - `0:` **Text tokens** - Streamed response content (e.g., `0:"Hello"\n`)
+    - `2:` **Metadata** - Message ID and session info (e.g., `2:{"message_id":"uuid"}\n`)
+    - `g:` **Progress** - Status indicators (e.g., `g:"Searching vector database..."\n`)
+    - `e:` **Completion** - Finish reason (e.g., `e:{"finishReason":"stop"}\n`)
+
+    **Message Processing Flow:**
+    1. User message validated and saved to database
+    2. Conversation history (last **20 messages**) loaded for context
+    3. Message routed to workflow:
+        - **Vector RAG**: If `vector_knowledge_base_id` or session type is `VECTOR`
+        - **General Chat**: For conversational queries
+    4. AI response streamed in real-time with token tracking
+    5. Assistant message saved with full token usage metadata
+
+    **Rate Limiting:**
+    - **20 messages per minute** per user
+    - Returns **429** with reset time if exceeded
+
+    **Content Validation:**
+    - Maximum message length: **50,000 characters**
+    - Content automatically sanitized (whitespace trimmed, unicode normalized)
+    - HTML/script tags escaped for security
+
+    **Access Control:**
+    - Users can only send messages to their own sessions
 
     Args:
-        request: FastAPI request object
-        session_id: Session UUID
-        message: Message content and optional parameters
-        current_user: Authenticated user from JWT
-        chat_service: ChatService instance
-        rate_limiter: Rate limiter instance
+        request: The `Request` object for rate limiting and logging.
+        session_id: The UUID of the target session.
+        message: A `ChatMessageCreate` object containing:
+            - `content`: The user's message (1-50,000 chars)
+            - `state`: Optional UI state for resuming conversations
+            - `model_id`: Optional specific LLM model override
+            - `web_search_enabled`: Enable web search (default: `False`)
+            - `vector_knowledge_base_id`: RAG knowledge base to query
+        current_user: The authenticated user.
+        chat_service: The `ChatService` instance for message handling.
+        rate_limiter: The `ChatRateLimiter` for quota enforcement.
 
     Returns:
-        StreamingResponse: AI SDK protocol formatted stream
+        A `StreamingResponse` with:
+        - `Content-Type: text/event-stream`
+        - `Cache-Control: no-cache`
+        - AI SDK protocol formatted stream
 
     Raises:
-        HTTPException 400: Invalid session ID or message content
-        HTTPException 404: Session not found
-        HTTPException 403: Not authorized to access session
-        HTTPException 429: Rate limit exceeded (20 messages per minute)
-        HTTPException 500: Internal server error
+        HTTPException: **400** if invalid format, **404** if session not found, **403** if unauthorized, **429** if rate limited.
     """
     request_id = setup_request_context(request, current_user)
     user_id = str(current_user["_id"])
@@ -1409,24 +1564,42 @@ async def get_chat_messages(
     limit: int = Query(50, ge=1, le=100, description="Maximum number of messages to return (max: 100)"),
 ):
     """
-    Get messages for a chat session with pagination.
+    Retrieve conversation history for a chat session with pagination.
+
+    Returns all messages (both `USER` and `ASSISTANT` roles) with complete metadata,
+    including token usage, tool invocations, and SQL queries (if applicable).
+
+    **Message Ordering:**
+    - Chronological order (**oldest first**)
+    - Enables sequential conversation replay
+
+    **Pagination:**
+    - Default: **50 messages** per page
+    - Maximum: **100 messages** per page
+    - Use`skip` and `limit` for infinite scroll or page-based loading
+
+    **Message Content:**
+    Each message includes:
+    - Full conversation content
+    - Role indicator (`USER` or `ASSISTANT`)
+    - Status (`PENDING`, `COMPLETED`, `FAILED`)
+    - Token usage breakdown (prompt, completion, total)
+    - Tool invocations (for function calling)
+    - SQL queries (for SQL workflow)
 
     Args:
-        request: FastAPI request object
-        session_id: Session UUID
-        current_user: Authenticated user from JWT
-        chat_service: ChatService instance
-        skip: Pagination offset
-        limit: Maximum results per page
+        request: The `Request` object for logging.
+        session_id: The UUID of the session.
+        current_user: The authenticated user.
+        chat_service: The `ChatService` instance.
+        skip: Number of messages to skip (default: `0`).
+        limit: Maximum messages to return (max: `100`, default: `50`).
 
     Returns:
-        List[ChatMessageResponse]: List of messages ordered by creation time
+        A list of `ChatMessageResponse` objects in chronological order.
 
     Raises:
-        HTTPException 400: Invalid session ID format
-        HTTPException 404: Session not found
-        HTTPException 403: Not authorized to access session
-        HTTPException 500: Internal server error
+        HTTPException: **400** if invalid session ID, **404** if not found, **403** if unauthorized.
     """
     request_id = setup_request_context(request, current_user)
     user_id = str(current_user["_id"])
@@ -1626,25 +1799,48 @@ async def vote_on_message(
     vote_manager: MessageVoteManager = Depends(get_vote_manager),
 ):
     """
-    Vote on a message (thumbs up or down).
+    Provide feedback on an AI assistant message via thumbs up/down voting.
+
+    Collects user feedback to improve model performance through RLHF (Reinforcement Learning
+    from Human Feedback). Votes are Used to identify high-quality responses and problematic outputs.
+
+    **Vote Types:**
+    - `up` - **Positive feedback** (thumbs up) for helpful, accurate, or well-formatted responses
+    - `down` - **Negative feedback** (thumbs down) for incorrect, irrelevant, or poorly formatted responses
+
+    **Vote Behavior:**
+    - **Idempotent**: Voting multiple times updates the existing vote
+    - **One vote per user per message**: Users cannot cast multiple votes on the same message
+    - **Persistent**: Votes are stored in MongoDB for analytics and model training
+
+    **Use Cases:**
+    - Quality assurance for LLM responses
+    - RLHF training dataset collection
+    - Response performance tracking over time
+    - A/B testing different models or prompts
+
+    **Access Control:**
+    - Users can only vote on messages in their own sessions
 
     Args:
-        request: FastAPI request object
-        session_id: Session UUID
-        message_id: Message UUID
-        vote_data: Vote type (up or down)
-        current_user: Authenticated user from JWT
-        chat_service: ChatService instance
-        vote_manager: Vote manager instance
+        request: The `Request` object for logging.
+        session_id: The UUID of the session containing the message.
+        message_id: The UUID of the message to vote on.
+        vote_data: A `MessageVoteCreate` object with:
+            - `vote_type`: Either `"up"` or `"down"`
+        current_user: The authenticated user.
+        chat_service: The `ChatService` instance.
+        vote_manager: The `MessageVoteManager` for vote persistence.
 
     Returns:
-        dict: Vote confirmation with status and vote type
+        A JSON response with:
+        - `status`: `"success"`
+        - `message`: Confirmation text
+        -` vote_type`: The recorded vote (`"up"` or `"down"`)
+        - `updated`: `True` if vote was updated, `False` if newly created
 
     Raises:
-        HTTPException 400: Invalid session/message ID or vote type
-        HTTPException 404: Session or message not found
-        HTTPException 403: Not authorized to vote on message
-        HTTPException 500: Internal server error
+        HTTPException: **400** if invalid IDs, **404** if session/message not found, **403** if unauthorized.
     """
     request_id = setup_request_context(request, current_user)
     user_id = str(current_user["_id"])
@@ -1844,23 +2040,40 @@ async def get_session_votes(
     vote_manager: MessageVoteManager = Depends(get_vote_manager),
 ):
     """
-    Get all votes for messages in a session.
+    Retrieve all votes for messages in a chat session.
+
+    Returns a complete list of user feedback (thumbs up/down) for all messages in the session.
+    Useful for analyzing overall conversation quality and identifying response issues.
+
+    **Response Includes:**
+    - Complete vote history for the session
+    - Vote details: `message_id`, `user_id`, `vote_type`, timestamps
+    - Total vote count and vote distribution (up vs down)
+
+    **Use Cases:**
+    - **Quality Analysis**: Assess overall conversation satisfaction
+    - **Response Patterns**: Identify which types of responses get positive/negative feedback
+    - **Model Comparison**: Compare vote distributions across different models
+    - **Training Data**: Collect feedback for RLHF training datasets
+
+    **Access Control:**
+    - Users can only access votes for their own sessions
 
     Args:
-        request: FastAPI request object
-        session_id: Session UUID
-        current_user: Authenticated user from JWT
-        chat_service: ChatService instance
-        vote_manager: Vote manager instance
+        request: The `Request` object for logging.
+        session_id: The UUID of the session.
+        current_user: The authenticated user.
+        chat_service: The `ChatService` instance.
+        vote_manager: The `MessageVoteManager` for vote retrieval.
 
     Returns:
-        dict: Votes grouped by message with statistics
+        A JSON response containing:
+        - `session_id`: The session identifier
+        - `votes`: List of vote objects with message IDs and vote types
+        - `total_votes`: Total number of votes cast
 
     Raises:
-        HTTPException 400: Invalid session ID format
-        HTTPException 404: Session not found
-        HTTPException 403: Not authorized to access session
-        HTTPException 500: Internal server error
+        HTTPException: **400** if invalid session ID, **404** if session not found, **403** if unauthorized.
     """
     request_id = setup_request_context(request, current_user)
     user_id = str(current_user["_id"])
@@ -2044,21 +2257,37 @@ async def get_message_token_usage(
     current_user: dict = Depends(enforce_all_lockdowns),
 ):
     """
-    Get token usage for a specific message.
+    Retrieve detailed token usage information for a specific message.
+
+    Provides a breakdown of token consumption and estimated costs for a single interaction.
+    Essential for granular cost tracking and prompt optimization.
+
+    **Token Information:**
+    - **Prompt Tokens**: Input tokens (user message + conversation history context)
+    - **Completion Tokens**: Output tokens (AI generated response)
+    - **Total Tokens**: Sum of prompt and completion tokens
+    - **Cost**: Estimated cost based on model pricing (currently $0.00 for local models)
+    - **Model**: The specific LLM model used (e.g., `llama3.2:latest`)
+
+    **Estimation Method:**
+    - Uses `tiktoken` or model-specific tokenizers for accurate counting
+    - For Ollama models, provides best-effort estimation if exact counts aren't available
+
+    **Access Control:**
+    - Users can only view token usage for their own messages
 
     Args:
-        request: FastAPI request object
-        message_id: Message UUID
-        current_user: Authenticated user from JWT
+        request: The `Request` object for logging.
+        message_id: The UUID of the message.
+        current_user: The authenticated user.
 
     Returns:
-        dict: Token usage details (prompt_tokens, completion_tokens, total_tokens, cost, model)
+        A dictionary containing token usage details:
+        - `prompt_tokens`, `completion_tokens`, `total_tokens`
+        - `cost`, `model`, `created_at`
 
     Raises:
-        HTTPException 400: Invalid message ID format
-        HTTPException 404: Message or token usage not found
-        HTTPException 403: Not authorized to access message
-        HTTPException 500: Internal server error
+        HTTPException: **400** if invalid ID, **404** if not found, **403** if unauthorized.
     """
     request_id = setup_request_context(request, current_user)
     user_id = str(current_user["_id"])
@@ -2234,20 +2463,38 @@ async def get_token_usage_summary(
     model: Optional[str] = Query(None, description="Filter by model name (e.g., 'llama3.2:latest')"),
 ):
     """
-    Get token usage summary for the authenticated user.
+    Retrieve comprehensive token usage statistics for the authenticated user.
+
+    Aggregates token consumption across all sessions and messages, providing a high-level
+    overview of usage patterns and costs.
+
+    **Summary Metrics:**
+    - **Total Tokens**: Cumulative tokens used across all models
+    - **Total Cost**: Cumulative estimated cost
+    - **Message Count**: Total number of AI interactions
+    - **Model Breakdown**: Usage statistics grouped by model name
+
+    **Filtering Options:**
+    - **Date Range**: Filter by `start_date` and `end_date` (ISO 8601)
+    - **Model**: Filter by specific model name (e.g., `mistral:latest`)
+
+    **Use Cases:**
+    - Monthly usage reporting
+    - Cost analysis and budget tracking
+    - Identifying most frequently used models
 
     Args:
-        request: FastAPI request object
-        current_user: Authenticated user from JWT
-        start_date: Optional start date filter
-        end_date: Optional end date filter
-        model: Optional model name filter
+        request: The `Request` object for logging.
+        current_user: The authenticated user.
+        start_date: Optional start date filter (ISO 8601).
+        end_date: Optional end date filter (ISO 8601).
+        model: Optional model name filter.
 
     Returns:
-        TokenUsageSummaryResponse: Summary statistics (total_tokens, total_cost, model_breakdown)
+        A `TokenUsageSummaryResponse` with aggregated statistics and model breakdown.
 
     Raises:
-        HTTPException 500: Internal server error
+        HTTPException: **500** if calculation fails.
     """
     request_id = setup_request_context(request, current_user)
     user_id = str(current_user["_id"])
@@ -2474,23 +2721,39 @@ async def get_token_usage_summary(
 )
 async def chat_health_check(request: Request):
     """
-    Comprehensive health check for chat system.
+    Perform a comprehensive health check of the Chat System and its dependencies.
 
-    Checks connectivity and response times for:
-    - Ollama (LLM service)
-    - MongoDB (database)
-    - Redis (caching and rate limiting)
-    - Qdrant (vector database)
+    Verifies the operational status of all critical and non-critical components required
+    for the chat functionality.
+
+    **Services Checked:**
+    - **Ollama** (Critical): LLM inference service connectivity and response time
+    - **MongoDB** (Critical): Database read/write latency
+    - **Redis** (Non-critical): Cache and rate limiter availability
+    - **Qdrant** (Non-critical): Vector database status (for RAG)
+
+    **Status Levels:**
+    - `healthy`: All critical services are operational
+    - `degraded`: Critical services OK, but some non-critical services are down
+    - `unhealthy`: One or more critical services are down
+
+    **Response Details:**
+    - Individual status and latency (ms) for each service
+    - Total system response time
+    - Error messages for any failing components
+
+    **Access:**
+    - Public endpoint (no authentication required) for monitoring systems (e.g., Prometheus, K8s probes)
 
     Args:
-        request: FastAPI request object
+        request: The `Request` object for logging.
 
     Returns:
-        dict: Health status with service details and response times
+        A dictionary containing the overall `status`, `timestamp`, and detailed `services` report.
 
     Status Codes:
-        200: All critical services healthy
-        503: One or more critical services unhealthy
+        - **200 OK**: System is healthy or degraded (usable)
+        - **503 Service Unavailable**: Critical failure (unusable)
     """
     import time
 

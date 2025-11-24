@@ -1,9 +1,38 @@
 """
-Admin models for password reset abuse event review and admin API schemas.
+# Admin Models
 
-- PEP 8/257 compliant, MyPy strict compatible.
-- All fields are typed, with docstrings for models and fields.
-- Linting/tooling config at file end.
+This module defines the **data structures** for the Administrative Interface.
+It includes models for abuse detection, whitelist/blocklist management, and event review.
+
+## Domain Overview
+
+The Admin System allows privileged users to:
+- **Monitor Abuse**: Track suspicious activities like password reset spam.
+- **Manage Access**: Whitelist or blocklist specific IP/Email pairs.
+- **Review Events**: Audit and resolve security incidents.
+
+## Key Models
+
+### 1. Abuse Event
+- **Purpose**: Represents a security incident requiring admin attention.
+- **Fields**: `email`, `ip`, `event_type`, `timestamp`, `resolved`.
+- **Usage**: Stored in MongoDB for audit trails and review queues.
+
+### 2. Email/IP Pair
+- **Purpose**: A simple tuple for whitelist/blocklist operations.
+- **Fields**: `email`, `ip`.
+- **Usage**: Used in Redis sets for high-speed access control checks.
+
+## Usage Example
+
+```python
+event = AbuseEvent(
+    email="user@example.com",
+    ip="192.168.1.1",
+    event_type="reset_spam",
+    timestamp=datetime.utcnow()
+)
+```
 """
 
 from datetime import datetime

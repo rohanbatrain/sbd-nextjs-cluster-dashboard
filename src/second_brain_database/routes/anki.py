@@ -1,4 +1,70 @@
-from datetime import datetime
+"""
+# MemEx (Anki) Routes
+
+This module provides the **REST API endpoints** for the Memory Extension (MemEx) system.
+It implements a Spaced Repetition System (SRS) inspired by Anki and SuperMemo-2.
+
+## Domain Overview
+
+MemEx helps users retain information efficiently through active recall and spaced repetition:
+- **Decks**: Collections of flashcards (e.g., "Spanish Vocab", "Python Syntax").
+- **Cards**: Individual Q&A pairs with scheduling metadata.
+- **Reviews**: User self-assessment of recall quality (0-5 rating).
+- **Algorithm**: SM-2 algorithm calculates the optimal next review date.
+
+## Key Features
+
+### 1. Deck & Card Management
+- **Organization**: Create and manage decks to group related knowledge.
+- **Content**: Add cards with front (question) and back (answer) content.
+
+### 2. Study Session
+- **Due Cards**: Efficiently query cards that are due for review (`next_review_date <= NOW`).
+- **Session Limits**: Fetch cards in batches (e.g., 20 at a time) to prevent overwhelm.
+
+### 3. Review Process
+- **Grading**: User rates recall difficulty:
+    - 0: Blackout
+    - 3: Pass (Hard)
+    - 5: Perfect
+- **Scheduling**: Updates `interval`, `ease_factor`, and `next_review_date` based on the rating.
+
+## API Endpoints
+
+### Management
+- `POST /anki/decks` - Create deck
+- `GET /anki/decks` - List decks
+- `POST /anki/decks/{id}/cards` - Add card
+
+### Study
+- `GET /anki/study` - Get due cards
+- `POST /anki/review/{card_id}` - Submit review
+
+## Usage Examples
+
+### Fetching Due Cards
+
+```python
+# Get cards due for review in the "Python" deck
+response = await client.get("/anki/study", params={"deck_id": "deck_python_101"})
+cards = response.json()
+```
+
+### Submitting a Review
+
+```python
+# User recalled the card perfectly (Rating 5)
+await client.post(f"/anki/review/{card_id}", json={
+    "rating": 5
+})
+# Card is rescheduled for a future date
+```
+
+## Module Attributes
+
+Attributes:
+    router (APIRouter): FastAPI router with `/anki` prefix
+"""
 from typing import List
 
 from fastapi import APIRouter, HTTPException, Query

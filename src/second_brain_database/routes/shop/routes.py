@@ -1,3 +1,84 @@
+"""
+# Digital Shop Routes
+
+This module provides the **REST API endpoints** for the Digital Asset Shop.
+It handles the browsing, purchasing, and inventory management of virtual items.
+
+## Domain Overview
+
+The Digital Shop is a marketplace for customizing the user experience.
+- **Virtual Economy**: Transactions use "SBD Tokens" (Second Brain Database Tokens).
+- **Asset Types**: Themes, Avatars, Banners, and Bundles.
+- **Ownership**: Permanent purchases or temporary rentals (future scope).
+- **Family Integration**: Users can spend from shared family token accounts.
+
+## Key Features
+
+### 1. Storefront & Catalog
+- **Browsing**: Categorized lists of items (e.g., "Dark Themes", "Animated Avatars").
+- **Search**: Find items by name or tag.
+- **Bundles**: Discounted packs of multiple items.
+- **Inventory**: Track user ownership and purchase history.
+
+### 2. Shopping Cart & Checkout
+- **Cart Management**: Add/remove items, update quantities.
+- **Checkout Process**: Atomic transaction processing.
+- **Validation**: Stock checks (for limited items) and balance verification.
+
+### 3. Payment Processing
+- **Dual Payment Methods**:
+    - **Personal**: Pay with own SBD tokens.
+    - **Family**: Pay with family tokens (requires spending permission).
+- **Transaction Safety**:
+    - **Atomicity**: Uses MongoDB transactions to ensure data consistency.
+    - **Audit Trail**: Records detailed transaction logs for sender and receiver.
+    - **Notifications**: Alerts family admins of purchases made with family funds.
+
+## API Endpoints
+
+### Catalog
+- `GET /shop/items` - List all items
+- `GET /shop/categories` - List categories
+- `GET /shop/items/{id}` - Item details
+
+### Cart & Checkout
+- `GET /shop/cart` - View cart
+- `POST /shop/cart/add` - Add item
+- `POST /shop/checkout` - Process purchase
+
+### Inventory
+- `GET /shop/inventory` - View owned items
+- `GET /shop/payment-options` - Check balances
+
+## Usage Examples
+
+### Adding Item to Cart
+
+```python
+await client.post("/shop/cart/add", json={
+    "item_id": "theme_dark_mode",
+    "quantity": 1
+})
+```
+
+### Checkout with Family Tokens
+
+```python
+await client.post("/shop/checkout", json={
+    "payment_method": {
+        "type": "family",
+        "family_id": "fam_12345"
+    }
+})
+```
+
+## Module Attributes
+
+Attributes:
+    router (APIRouter): FastAPI router for shop endpoints
+    SHOP_COLLECTION (str): Database collection name ("shop")
+"""
+
 from datetime import datetime, timezone
 import time
 from typing import Any, Dict, List, Optional
@@ -37,49 +118,80 @@ SHOP_COLLECTION = "shop"
 
 # Payment method models
 class PaymentMethod(BaseModel):
-    """Payment method selection for shop purchases."""
+    """
+    Model specifying the payment source for a transaction.
+
+    **Types:**
+    *   **personal**: Uses the user's own SBD token balance.
+    *   **family**: Uses a family's shared SBD account (requires permissions).
+    """
 
     type: str = Field(..., description="Payment type: 'personal' or 'family'")
     family_id: Optional[str] = Field(None, description="Family ID if using family tokens")
 
 
 class PurchaseRequest(BaseModel):
-    """Base purchase request with payment method."""
+    """
+    Base model for all purchase requests.
+
+    Includes the selected payment method which determines the source of funds.
+    """
 
     payment_method: PaymentMethod = Field(..., description="Payment method selection")
 
 
 class ThemePurchaseRequest(PurchaseRequest):
-    """Theme purchase request with payment method."""
+    """
+    Request model for purchasing a UI theme.
+    """
 
     theme_id: str = Field(..., description="Theme ID to purchase")
 
 
 class AvatarPurchaseRequest(PurchaseRequest):
-    """Avatar purchase request with payment method."""
+    """
+    Request model for purchasing a user avatar.
+    """
 
     avatar_id: str = Field(..., description="Avatar ID to purchase")
 
 
 class BannerPurchaseRequest(PurchaseRequest):
-    """Banner purchase request with payment method."""
+    """
+    Request model for purchasing a profile banner.
+    """
 
     banner_id: str = Field(..., description="Banner ID to purchase")
 
 
 class BundlePurchaseRequest(PurchaseRequest):
-    """Bundle purchase request with payment method."""
+    """
+    Request model for purchasing a bundle of items.
+    """
 
     bundle_id: str = Field(..., description="Bundle ID to purchase")
 
 
 class CartCheckoutRequest(BaseModel):
-    """Cart checkout request with payment method."""
+    """
+    Request model for checking out the entire shopping cart.
+    """
 
     payment_method: PaymentMethod = Field(..., description="Payment method selection")
 
 
 class ShopItemResponse(BaseModel):
+    """
+    Response model for a single shop item.
+
+    Represents a purchasable digital asset (theme, avatar, banner, or bundle).
+
+    **Fields:**
+    *   **item_type**: Categorizes the item (e.g., 'theme', 'avatar').
+    *   **bundle_contents**: Only populated if `item_type` is 'bundle'.
+    *   **available**: If False, the item cannot be purchased (e.g., out of stock or retired).
+    """
+
     item_id: str
     name: str
     description: Optional[str]
@@ -94,6 +206,12 @@ class ShopItemResponse(BaseModel):
 
 
 class ShopCategoryResponse(BaseModel):
+    """
+    Response model for a shop category.
+
+    Used to group items in the storefront UI.
+    """
+
     category_id: str
     name: str
     description: Optional[str]
@@ -101,7 +219,13 @@ class ShopCategoryResponse(BaseModel):
 
 
 class CategoryCreateRequest(BaseModel):
-    """Request model for creating a new category."""
+    """
+    Request model for creating a new shop category.
+
+    **Validation:**
+    *   **color**: Must be a valid hex code (e.g., #FF0000).
+    """
+
     name: str = Field(..., min_length=1, max_length=100, description="Category name")
     description: Optional[str] = Field(None, max_length=500, description="Category description")
     icon: Optional[str] = Field(None, description="Category icon/emoji")
@@ -110,7 +234,10 @@ class CategoryCreateRequest(BaseModel):
 
 
 class CategoryUpdateRequest(BaseModel):
-    """Request model for updating a category."""
+    """
+    Request model for updating an existing shop category.
+    """
+
     name: Optional[str] = Field(None, min_length=1, max_length=100, description="Category name")
     description: Optional[str] = Field(None, max_length=500, description="Category description")
     icon: Optional[str] = Field(None, description="Category icon/emoji")
@@ -118,7 +245,12 @@ class CategoryUpdateRequest(BaseModel):
 
 
 class CategoryDetailResponse(BaseModel):
-    """Detailed category response with stats."""
+    """
+    Detailed response model for a shop category.
+
+    Includes metadata like `item_count` and timestamps.
+    """
+
     category_id: str
     name: str
     description: Optional[str]
@@ -131,12 +263,25 @@ class CategoryDetailResponse(BaseModel):
 
 
 class CartItemRequest(BaseModel):
+    """
+    Request model for adding/updating an item in the cart.
+
+    **Validation:**
+    *   **quantity**: Must be at least 1.
+    """
+
     item_id: str
     item_type: str
     quantity: int = 1
 
 
 class CartItemResponse(BaseModel):
+    """
+    Response model for a single line item in the shopping cart.
+
+    Includes calculated fields like `subtotal`.
+    """
+
     item_id: str
     item_type: str
     name: str
@@ -146,12 +291,27 @@ class CartItemResponse(BaseModel):
 
 
 class CartResponse(BaseModel):
+    """
+    Response model for the full shopping cart state.
+
+    **Fields:**
+    *   **total_price**: Sum of all item subtotals.
+    """
+
     items: List[CartItemResponse]
     total_items: int
     total_price: int
 
 
 class CheckoutResponse(BaseModel):
+    """
+    Response model for a successful checkout transaction.
+
+    **Fields:**
+    *   **transaction_id**: Unique identifier for the SBD ledger entry.
+    *   **status**: 'success', 'pending', or 'failed'.
+    """
+
     transaction_id: str
     items_purchased: List[str]
     total_amount: int
@@ -160,6 +320,14 @@ class CheckoutResponse(BaseModel):
 
 
 class OwnedItemResponse(BaseModel):
+    """
+    Response model for an item owned by the user.
+
+    **Fields:**
+    *   **source**: Origin of the item ('purchase', 'gift', 'bundle').
+    *   **permanent**: If False, the item is a rental and will expire.
+    """
+
     item_id: str
     item_type: str
     name: str
@@ -170,6 +338,12 @@ class OwnedItemResponse(BaseModel):
 
 
 class InventoryResponse(BaseModel):
+    """
+    Response model for the user's full inventory of digital assets.
+
+    Grouped by item type for easy frontend rendering.
+    """
+
     themes: List[OwnedItemResponse]
     avatars: List[OwnedItemResponse]
     banners: List[OwnedItemResponse]
@@ -178,6 +352,10 @@ class InventoryResponse(BaseModel):
 
 
 class BalanceResponse(BaseModel):
+    """
+    Response model for the user's SBD token balance.
+    """
+
     sbd_tokens: int
     username: str
 
@@ -899,13 +1077,28 @@ async def get_all_shop_items() -> List[Dict[str, Any]]:
 
 @router.get("/shop/items", response_model=List[ShopItemResponse])
 async def get_shop_items(
-    item_type: Optional[str] = Query(None),
-    category: Optional[str] = Query(None),
-    featured_only: bool = Query(False),
-    limit: int = Query(50, le=100),
-    offset: int = Query(0, ge=0),
+    item_type: Optional[str] = Query(None, description="Filter by item type (theme, avatar, etc.)"),
+    category: Optional[str] = Query(None, description="Filter by category name"),
+    featured_only: bool = Query(False, description="Show only featured items"),
+    limit: int = Query(50, le=100, description="Items per page"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
 ):
-    """Get available shop items with optional filtering."""
+    """
+    Retrieve a list of available shop items.
+
+    Supports filtering by type, category, and featured status.
+    Results are paginated.
+
+    Args:
+        item_type (str, optional): Filter by item type (e.g., 'theme', 'avatar').
+        category (str, optional): Filter by category name.
+        featured_only (bool): If True, returns only featured items.
+        limit (int): Maximum number of items to return (default: 50).
+        offset (int): Number of items to skip (default: 0).
+
+    Returns:
+        List[ShopItemResponse]: A list of shop items matching the criteria.
+    """
     all_items = await get_all_shop_items()
     
     # Apply filters
@@ -927,8 +1120,20 @@ async def get_shop_items(
 
 
 @router.get("/shop/items/{item_id}", response_model=ShopItemResponse)
-async def get_shop_item(item_id: str, item_type: str = Query(...)):
-    """Get detailed information about a specific shop item."""
+async def get_shop_item(item_id: str, item_type: str = Query(..., description="Type of the item")):
+    """
+    Get detailed information about a specific shop item.
+
+    Args:
+        item_id (str): The unique ID of the item.
+        item_type (str): The type of the item (required for lookup optimization).
+
+    Returns:
+        ShopItemResponse: The item details.
+
+    Raises:
+        HTTPException(404): If the item is not found.
+    """
     item = await get_item_details(item_id, item_type)
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
@@ -937,7 +1142,15 @@ async def get_shop_item(item_id: str, item_type: str = Query(...)):
 
 @router.get("/shop/categories", response_model=List[ShopCategoryResponse])
 async def get_shop_categories_endpoint():
-    """Get all available shop categories organized by item type."""
+    """
+    Retrieve all shop categories.
+
+    Categories are organized by item type (e.g., Theme Categories, Avatar Categories).
+    This endpoint provides the structure for the shop's navigation menu.
+
+    Returns:
+        List[ShopCategoryResponse]: A list of all available categories.
+    """
     categories = []
     for item_type, cats in SHOP_CATEGORIES.items():
         for cat in cats:
@@ -956,7 +1169,22 @@ async def create_category(
     category: CategoryCreateRequest,
     current_user: dict = Depends(enforce_all_lockdowns)
 ):
-    """Create a new shop category."""
+    """
+    Create a new shop category.
+
+    **Access Control:**
+    Restricted to administrators (enforced via `enforce_all_lockdowns` and internal logic).
+
+    Args:
+        category (CategoryCreateRequest): The category details.
+        current_user (dict): The authenticated user (admin).
+
+    Returns:
+        CategoryDetailResponse: The created category.
+
+    Raises:
+        HTTPException(400): If a category with the same name already exists for the item type.
+    """
     # Check if user has admin permissions (you may want to add a specific permission check)
     shop_collection = db_manager.get_tenant_collection("shop_categories")
     
@@ -1001,7 +1229,24 @@ async def update_category(
     category: CategoryUpdateRequest,
     current_user: dict = Depends(enforce_all_lockdowns)
 ):
-    """Update an existing shop category."""
+    """
+    Update an existing shop category.
+
+    Allows modifying the name, description, icon, and color.
+    Updates the `updated_at` timestamp and `updated_by` field.
+
+    Args:
+        category_id (str): The ID of the category to update.
+        category (CategoryUpdateRequest): The fields to update.
+        current_user (dict): The authenticated user (admin).
+
+    Returns:
+        CategoryDetailResponse: The updated category details.
+
+    Raises:
+        HTTPException(404): If the category is not found.
+        HTTPException(400): If no fields are provided for update.
+    """
     shop_collection = db_manager.get_tenant_collection("shop_categories")
     
     # Find existing category
@@ -1050,7 +1295,23 @@ async def delete_category(
     category_id: str,
     current_user: dict = Depends(enforce_all_lockdowns)
 ):
-    """Delete a shop category."""
+    """
+    Delete a shop category.
+
+    **Constraint:**
+    A category cannot be deleted if it contains items. All items must be reassigned or deleted first.
+
+    Args:
+        category_id (str): The ID of the category to delete.
+        current_user (dict): The authenticated user (admin).
+
+    Returns:
+        dict: Success message.
+
+    Raises:
+        HTTPException(404): If the category is not found.
+        HTTPException(400): If the category is not empty.
+    """
     shop_collection = db_manager.get_tenant_collection("shop_categories")
     
     # Find existing category
@@ -1076,7 +1337,20 @@ async def delete_category(
 
 @router.get("/shop/categories/{category_id}", response_model=CategoryDetailResponse)
 async def get_category_detail(category_id: str):
-    """Get detailed information about a specific category."""
+    """
+    Get detailed information about a specific category.
+
+    Includes the count of items currently assigned to this category.
+
+    Args:
+        category_id (str): The unique ID of the category.
+
+    Returns:
+        CategoryDetailResponse: The category details with item count.
+
+    Raises:
+        HTTPException(404): If the category is not found.
+    """
     shop_collection = db_manager.get_tenant_collection("shop_categories")
     
     category = await shop_collection.find_one({"category_id": category_id})
@@ -1095,7 +1369,18 @@ async def get_category_detail(category_id: str):
 
 @router.get("/shop/categories/{category_id}/items", response_model=List[ShopItemResponse])
 async def get_category_items(category_id: str):
-    """Get all items in a specific category."""
+    """
+    Retrieve all items belonging to a specific category.
+
+    Args:
+        category_id (str): The ID of the category.
+
+    Returns:
+        List[ShopItemResponse]: A list of items in the category.
+
+    Raises:
+        HTTPException(404): If the category is not found.
+    """
     shop_collection = db_manager.get_tenant_collection("shop_categories")
     
     category = await shop_collection.find_one({"category_id": category_id})
@@ -1119,7 +1404,19 @@ async def create_shop_item(
     item: dict,
     current_user: dict = Depends(enforce_all_lockdowns)
 ):
-    """Create a new shop item."""
+    """
+    Create a new item in the shop.
+
+    **Access Control:**
+    Restricted to administrators.
+
+    Args:
+        item (dict): The item details (name, price, type, etc.).
+        current_user (dict): The authenticated user (admin).
+
+    Returns:
+        ShopItemResponse: The created item.
+    """
     shop_items_collection = db_manager.get_tenant_collection("shop_items")
     
     item_id = uuid4().hex
@@ -1153,7 +1450,23 @@ async def update_shop_item(
     item: dict,
     current_user: dict = Depends(enforce_all_lockdowns)
 ):
-    """Update an existing shop item."""
+    """
+    Update an existing shop item.
+
+    Allows modifying details like price, description, availability, and stock.
+
+    Args:
+        item_id (str): The ID of the item to update.
+        item (dict): The fields to update.
+        current_user (dict): The authenticated user (admin).
+
+    Returns:
+        ShopItemResponse: The updated item.
+
+    Raises:
+        HTTPException(404): If the item is not found.
+        HTTPException(400): If no fields are provided for update.
+    """
     shop_items_collection = db_manager.get_tenant_collection("shop_items")
     
     existing = await shop_items_collection.find_one({"item_id": item_id})
@@ -1185,7 +1498,24 @@ async def delete_shop_item(
     item_id: str,
     current_user: dict = Depends(enforce_all_lockdowns)
 ):
-    """Delete a shop item."""
+    """
+    Permanently delete a shop item.
+
+    **Warning:**
+    This action removes the item from the shop. Users who have already purchased
+    this item will retain it in their inventory (as ownership is stored in the user record),
+    but the item will no longer be available for new purchases.
+
+    Args:
+        item_id (str): The ID of the item to delete.
+        current_user (dict): The authenticated user (admin).
+
+    Returns:
+        dict: Success message.
+
+    Raises:
+        HTTPException(404): If the item is not found.
+    """
     shop_items_collection = db_manager.get_tenant_collection("shop_items")
     
     existing = await shop_items_collection.find_one({"item_id": item_id})
@@ -1201,7 +1531,28 @@ async def bulk_update_items(
     updates: dict,
     current_user: dict = Depends(enforce_all_lockdowns)
 ):
-    """Bulk update shop items."""
+    """
+    Perform bulk operations on shop items.
+
+    Supports activating, deactivating, updating stock, or deleting multiple items at once.
+
+    **Supported Actions:**
+    *   `activate`: Make items available for purchase.
+    *   `deactivate`: Hide items from the shop.
+    *   `update_stock`: Set the stock level for items.
+    *   `delete`: Permanently remove items.
+
+    Args:
+        updates (dict): A dictionary containing `item_ids` (list) and `action` (str).
+                        For `update_stock`, also requires `stock` (int).
+        current_user (dict): The authenticated user (admin).
+
+    Returns:
+        dict: Summary of the operation (action taken and count of modified items).
+
+    Raises:
+        HTTPException(400): If required fields are missing or the action is unknown.
+    """
     shop_items_collection = db_manager.get_tenant_collection("shop_items")
     
     item_ids = updates.get("item_ids", [])
@@ -1246,7 +1597,20 @@ async def upload_item_image(
     image_url: str = Body(..., embed=True),
     current_user: dict = Depends(enforce_all_lockdowns)
 ):
-    """Update item image URL."""
+    """
+    Update the display image for a shop item.
+
+    Args:
+        item_id (str): The ID of the item.
+        image_url (str): The new image URL.
+        current_user (dict): The authenticated user (admin).
+
+    Returns:
+        dict: Success message and the new image URL.
+
+    Raises:
+        HTTPException(404): If the item is not found.
+    """
     shop_items_collection = db_manager.get_tenant_collection("shop_items")
     
     existing = await shop_items_collection.find_one({"item_id": item_id})
@@ -1273,7 +1637,21 @@ async def get_sales_analytics(
     period: str = Query("month", description="Period: day, week, month, year"),
     current_user: dict = Depends(enforce_all_lockdowns)
 ):
-    """Get sales analytics for the specified period."""
+    """
+    Retrieve sales analytics data.
+
+    Provides total revenue, total sales count, and average order value for the specified period.
+    Also includes a breakdown of sales over time and by category.
+
+    **Note:** Currently returns mock data structure for frontend integration.
+
+    Args:
+        period (str): The time period for analysis (default: "month").
+        current_user (dict): The authenticated user (admin).
+
+    Returns:
+        dict: Sales analytics data.
+    """
     # This would typically query a transactions/purchases collection
     # For now, returning mock data structure
     return {
@@ -1297,10 +1675,21 @@ async def get_sales_analytics(
 
 @router.get("/shop/analytics/top-items")
 async def get_top_selling_items(
-    limit: int = Query(10, le=50),
+    limit: int = Query(10, le=50, description="Number of items to return"),
     current_user: dict = Depends(enforce_all_lockdowns)
 ):
-    """Get top selling items."""
+    """
+    Get a list of top-selling items.
+
+    Items are ranked by their `sold_count`.
+
+    Args:
+        limit (int): Maximum number of items to return (default: 10).
+        current_user (dict): The authenticated user (admin).
+
+    Returns:
+        dict: List of top items and the total count returned.
+    """
     shop_items_collection = db_manager.get_tenant_collection("shop_items")
     
     # Get items sorted by a sold_count field (would need to track this)
@@ -1314,7 +1703,20 @@ async def get_top_selling_items(
 
 @router.get("/shop/analytics/revenue")
 async def get_revenue_breakdown(current_user: dict = Depends(enforce_all_lockdowns)):
-    """Get detailed revenue breakdown."""
+    """
+    Get a detailed revenue breakdown.
+
+    Includes revenue distribution by category (themes, avatars, etc.) and by month.
+    Also calculates the growth rate.
+
+    **Note:** Currently returns mock data.
+
+    Args:
+        current_user (dict): The authenticated user (admin).
+
+    Returns:
+        dict: Revenue breakdown data.
+    """
     return {
         "total_revenue": 125000,
         "by_category": {
@@ -1334,7 +1736,21 @@ async def get_revenue_breakdown(current_user: dict = Depends(enforce_all_lockdow
 
 @router.get("/shop/analytics/customers")
 async def get_customer_analytics(current_user: dict = Depends(enforce_all_lockdowns)):
-    """Get customer analytics."""
+    """
+    Get customer engagement analytics.
+
+    Metrics include:
+    *   Total customers (users who have made at least one purchase).
+    *   Active customers.
+    *   Average Lifetime Value (LTV).
+    *   Repeat purchase rate.
+
+    Args:
+        current_user (dict): The authenticated user (admin).
+
+    Returns:
+        dict: Customer analytics data.
+    """
     users_collection = db_manager.get_collection("users")
     
     # Count users with purchases
@@ -1358,7 +1774,18 @@ async def get_customer_analytics(current_user: dict = Depends(enforce_all_lockdo
 
 @router.get("/shop/inventory", response_model=InventoryResponse)
 async def get_inventory(current_user: dict = Depends(enforce_all_lockdowns)):
-    """Get user's owned items inventory."""
+    """
+    Retrieve the user's complete inventory of owned items.
+
+    Includes all purchased themes, avatars, banners, and bundles.
+    This data is used to populate the "My Stuff" or "Inventory" section of the shop.
+
+    Args:
+        current_user (dict): The authenticated user.
+
+    Returns:
+        InventoryResponse: A structured list of all owned items.
+    """
     users_collection = db_manager.get_collection("users")
     user = await users_collection.find_one({"username": current_user["username"]})
     
@@ -1373,7 +1800,15 @@ async def get_inventory(current_user: dict = Depends(enforce_all_lockdowns)):
 
 @router.get("/shop/balance", response_model=BalanceResponse)
 async def get_balance(current_user: dict = Depends(enforce_all_lockdowns)):
-    """Get user's SBD token balance."""
+    """
+    Get the user's current SBD token balance.
+
+    Args:
+        current_user (dict): The authenticated user.
+
+    Returns:
+        BalanceResponse: The user's token balance and username.
+    """
     users_collection = db_manager.get_collection("users")
     user = await users_collection.find_one({"username": current_user["username"]}, {"sbd_tokens": 1})
     
@@ -1828,35 +2263,24 @@ async def buy_theme(
 @router.post("/shop/avatars/buy", tags=["Shop"], summary="Buy an avatar with SBD tokens")
 async def buy_avatar(request: Request, data: dict = Body(...), current_user: dict = Depends(enforce_all_lockdowns)):
     """
-    Purchase an avatar using SBD tokens from a personal or family account.
+    Purchase an avatar using SBD tokens.
 
-    This endpoint allows a user to purchase an avatar. It supports two payment methods:
-    - **Personal:** Uses the user's own SBD token balance.
-    - **Family:** Uses a shared family SBD token account. If the user does not have
-      sufficient permissions to spend the required amount, a purchase request is
-      created for an administrator to approve.
+    Supports both personal and family token payments.
+    If using family tokens without sufficient permissions, a purchase request is created.
 
-    **Purchase Process:**
-    1. Validates the avatar ID and user authentication.
-    2. Validates the selected payment method.
-    3. Checks if the user already owns the avatar.
-    4. Verifies sufficient SBD token balance and spending permissions.
-    5. If payment is from a family account and permissions are insufficient, a purchase
-       request is created for admin approval.
-    6. Otherwise, the tokens are deducted and the avatar is added to the user's or family's
-       owned collection.
-    7. A transaction record is created, and for family purchases, a notification is sent.
+    **Process:**
+    1.  Validates avatar existence and price.
+    2.  Checks if the user already owns the avatar.
+    3.  Validates payment method (personal vs. family).
+    4.  Deducts tokens and grants ownership.
 
     Args:
-        request (Request): The incoming request object.
-        data (dict): A dictionary containing the purchase details:
-            - `avatar_id` (str): The ID of the avatar to purchase.
-            - `payment_method` (PaymentMethod): The selected payment method.
-        current_user (dict): The authenticated user, injected by Depends.
+        request (Request): The HTTP request.
+        data (dict): Purchase details (avatar_id, payment_method).
+        current_user (dict): The authenticated user.
 
     Returns:
-        dict: A dictionary confirming the successful purchase, or a pending approval status
-              if a family purchase request was created.
+        dict: Success message or pending approval status.
     """
     users_collection = db_manager.get_collection("users")
     username = current_user["username"]
@@ -2003,35 +2427,20 @@ async def buy_avatar(request: Request, data: dict = Body(...), current_user: dic
 @router.post("/shop/banners/buy", tags=["Shop"], summary="Buy a banner with SBD tokens")
 async def buy_banner(request: Request, data: dict = Body(...), current_user: dict = Depends(enforce_all_lockdowns)):
     """
-    Purchase a banner using SBD tokens from a personal or family account.
+    Purchase a banner using SBD tokens.
 
-    This endpoint allows a user to purchase a banner. It supports two payment methods:
-    - **Personal:** Uses the user's own SBD token balance.
-    - **Family:** Uses a shared family SBD token account. If the user does not have
-      sufficient permissions to spend the required amount, a purchase request is
-      created for an administrator to approve.
+    Banners are used to customize the user's profile header.
 
-    **Purchase Process:**
-    1. Validates the banner ID and user authentication.
-    2. Validates the selected payment method.
-    3. Checks if the user already owns the banner.
-    4. Verifies sufficient SBD token balance and spending permissions.
-    5. If payment is from a family account and permissions are insufficient, a purchase
-       request is created for admin approval.
-    6. Otherwise, the tokens are deducted and the banner is added to the user's or family's
-       owned collection.
-    7. A transaction record is created, and for family purchases, a notification is sent.
+    **Access Control:**
+    Requires authenticated user.
 
     Args:
-        request (Request): The incoming request object.
-        data (dict): A dictionary containing the purchase details:
-            - `banner_id` (str): The ID of the banner to purchase.
-            - `payment_method` (PaymentMethod): The selected payment method.
-        current_user (dict): The authenticated user, injected by Depends.
+        request (Request): The HTTP request.
+        data (dict): Purchase details (banner_id, payment_method).
+        current_user (dict): The authenticated user.
 
     Returns:
-        dict: A dictionary confirming the successful purchase, or a pending approval status
-              if a family purchase request was created.
+        dict: Success message or pending approval status.
     """
     users_collection = db_manager.get_collection("users")
     username = current_user["username"]
@@ -2178,36 +2587,18 @@ async def buy_banner(request: Request, data: dict = Body(...), current_user: dic
 @router.post("/shop/bundles/buy", tags=["Shop"], summary="Buy a bundle with SBD tokens")
 async def buy_bundle(request: Request, data: dict = Body(...), current_user: dict = Depends(enforce_all_lockdowns)):
     """
-    Purchase a bundle of items using SBD tokens from a personal or family account.
+    Purchase a bundle of items using SBD tokens.
 
-    This endpoint allows a user to purchase a bundle of items, such as avatars or themes.
-    It supports two payment methods:
-    - **Personal:** Uses the user's own SBD token balance.
-    - **Family:** Uses a shared family SBD token account. If the user does not have
-      sufficient permissions to spend the required amount, a purchase request is
-      created for an administrator to approve.
-
-    **Purchase Process:**
-    1. Validates the bundle ID and user authentication.
-    2. Validates the selected payment method.
-    3. Checks if the user already owns the bundle.
-    4. Verifies sufficient SBD token balance and spending permissions.
-    5. If payment is from a family account and permissions are insufficient, a purchase
-       request is created for admin approval.
-    6. Otherwise, the tokens are deducted and the bundle and its contents are added to the
-       user's or family's owned collection.
-    7. A transaction record is created, and for family purchases, a notification is sent.
+    Bundles contain multiple items (avatars, themes, etc.) at a discounted price.
+    Purchasing a bundle automatically unlocks all contained items.
 
     Args:
-        request (Request): The incoming request object.
-        data (dict): A dictionary containing the purchase details:
-            - `bundle_id` (str): The ID of the bundle to purchase.
-            - `payment_method` (PaymentMethod): The selected payment method.
-        current_user (dict): The authenticated user, injected by Depends.
+        request (Request): The HTTP request.
+        data (dict): Purchase details (bundle_id, payment_method).
+        current_user (dict): The authenticated user.
 
     Returns:
-        dict: A dictionary confirming the successful purchase, or a pending approval status
-              if a family purchase request was created.
+        dict: Success message, bundle details, and list of unlocked items.
     """
     users_collection = db_manager.get_collection("users")
     username = current_user["username"]
@@ -2452,24 +2843,22 @@ async def buy_bundle(request: Request, data: dict = Body(...), current_user: dic
 @router.post("/shop/cart/add", tags=["shop"], summary="Add an item to the cart by ID")
 async def add_to_cart(request: Request, data: dict = Body(...), current_user: dict = Depends(enforce_all_lockdowns)):
     """
-    Add an item to the user's shopping cart for a specific application.
+    Add an item to the user's shopping cart.
 
-    This endpoint adds a specified item to the user's cart. The cart is specific to the
-    application making the request, identified by the `User-Agent` header.
-
-    **Item Types:**
-    - `theme`
-    - `avatar`
-    - `bundle`
-    - `banner`
+    The cart is application-specific, identified by the `User-Agent` header.
+    Prevents adding duplicate items or items the user already owns.
 
     Args:
-        request (Request): The incoming request object.
-        data (dict): A dictionary containing the `item_id` and `item_type`.
-        current_user (dict): The authenticated user, injected by Depends.
+        request (Request): The HTTP request (used for User-Agent).
+        data (dict): Item details (`item_id`, `item_type`).
+        current_user (dict): The authenticated user.
 
     Returns:
-        dict: A dictionary confirming the successful addition of the item to the cart.
+        dict: Success message and added item details.
+
+    Raises:
+        HTTPException(400): If item is already owned or in cart.
+        HTTPException(404): If item is not found.
     """
     shop_collection = db_manager.get_tenant_collection(SHOP_COLLECTION)
     users_collection = db_manager.get_collection("users")
@@ -2514,18 +2903,20 @@ async def remove_from_cart(
     request: Request, data: dict = Body(...), current_user: dict = Depends(enforce_all_lockdowns)
 ):
     """
-    Remove an item from the user's shopping cart for a specific application.
+    Remove an item from the user's shopping cart.
 
-    This endpoint removes a specified item from the user's cart. The cart is specific to the
-    application making the request, identified by the `User-Agent` header.
+    Target cart is identified by the `User-Agent` header.
 
     Args:
-        request (Request): The incoming request object.
-        data (dict): A dictionary containing the `item_id` and `item_type` of the item to remove.
-        current_user (dict): The authenticated user, injected by Depends.
+        request (Request): The HTTP request.
+        data (dict): Item details (`item_id`, `item_type`).
+        current_user (dict): The authenticated user.
 
     Returns:
-        dict: A dictionary confirming the successful removal of the item from the cart.
+        dict: Success message.
+
+    Raises:
+        HTTPException(404): If the item is not found in the cart.
     """
     shop_collection = db_manager.get_tenant_collection(SHOP_COLLECTION)
     username = current_user["username"]
@@ -2559,7 +2950,16 @@ async def remove_from_cart(
 @router.delete("/shop/cart/clear", tags=["shop"], summary="Clear all items from a cart")
 async def clear_cart(request: Request, current_user: dict = Depends(enforce_all_lockdowns)):
     """
-    Clears items from a user's shopping cart for a specific app, identified by user-agent.
+    Clear all items from the user's shopping cart.
+
+    Target cart is identified by the `User-Agent` header.
+
+    Args:
+        request (Request): The HTTP request.
+        current_user (dict): The authenticated user.
+
+    Returns:
+        dict: Success message.
     """
     shop_collection = db_manager.get_tenant_collection(SHOP_COLLECTION)
     username = current_user["username"]
@@ -2585,6 +2985,18 @@ async def clear_cart(request: Request, current_user: dict = Depends(enforce_all_
 
 @router.get("/shop/cart", tags=["shop"], summary="Get a specific app cart")
 async def get_cart(request: Request, current_user: dict = Depends(enforce_all_lockdowns)):
+    """
+    Retrieve the current contents of the user's shopping cart.
+
+    Target cart is identified by the `User-Agent` header.
+
+    Args:
+        request (Request): The HTTP request.
+        current_user (dict): The authenticated user.
+
+    Returns:
+        dict: Cart contents and application name.
+    """
     shop_collection = db_manager.get_tenant_collection(SHOP_COLLECTION)
     username = current_user["username"]
     user_agent = request.headers.get("user-agent", "").lower()
@@ -2607,34 +3019,19 @@ async def get_cart(request: Request, current_user: dict = Depends(enforce_all_lo
 @router.post("/shop/cart/checkout", tags=["shop"], summary="Checkout a specific app cart with payment method selection")
 async def checkout_cart(request: Request, data: dict = Body({}), current_user: dict = Depends(enforce_all_lockdowns)):
     """
-    Checkout the user's shopping cart for a specific application.
+    Process checkout for the user's shopping cart.
 
-    This endpoint processes the checkout for all items in the user's cart for the application
-    making the request. It supports two payment methods:
-    - **Personal:** Uses the user's own SBD token balance.
-    - **Family:** Uses a shared family SBD token account. If the user does not have
-      sufficient permissions to spend the required amount, a purchase request is
-      created for each item in the cart for an administrator to approve.
-
-    **Checkout Process:**
-    1. Calculates the total price of all items in the cart.
-    2. Validates the selected payment method.
-    3. Verifies sufficient SBD token balance and spending permissions.
-    4. If payment is from a family account and permissions are insufficient, a purchase
-       request is created for each item for admin approval.
-    5. Otherwise, the total amount is deducted and the items are added to the user's or
-       family's owned collection.
-    6. The cart for the application is cleared.
-    7. A transaction record is created, and for family purchases, a notification is sent.
+    Calculates total price, validates payment method, and processes transactions for all items.
+    Supports personal and family token payments.
+    Automatically clears the cart upon successful checkout.
 
     Args:
-        request (Request): The incoming request object.
-        data (dict): A dictionary containing the `payment_method`.
-        current_user (dict): The authenticated user, injected by Depends.
+        request (Request): The HTTP request.
+        data (dict): Optional payment method details.
+        current_user (dict): The authenticated user.
 
     Returns:
-        dict: A dictionary confirming the successful checkout, or a pending approval status
-              if purchase requests were created.
+        dict: Checkout summary including transaction ID and purchased items.
     """
     shop_collection = db_manager.get_tenant_collection(SHOP_COLLECTION)
     users_collection = db_manager.get_collection("users")
@@ -2938,6 +3335,15 @@ async def checkout_cart(request: Request, data: dict = Body({}), current_user: d
 
 @router.get("/shop/avatars/owned", tags=["shop"], summary="Get user's owned avatars")
 async def get_owned_avatars(current_user: dict = Depends(enforce_all_lockdowns)):
+    """
+    Get a list of avatars owned by the user.
+
+    Args:
+        current_user (dict): The authenticated user.
+
+    Returns:
+        dict: List of owned avatars.
+    """
     users_collection = db_manager.get_collection("users")
     username = current_user["username"]
     user = await users_collection.find_one({"username": username}, {"avatars_owned": 1, "_id": 0})
@@ -2948,6 +3354,15 @@ async def get_owned_avatars(current_user: dict = Depends(enforce_all_lockdowns))
 
 @router.get("/shop/banners/owned", tags=["shop"], summary="Get user's owned banners")
 async def get_owned_banners(current_user: dict = Depends(enforce_all_lockdowns)):
+    """
+    Get a list of banners owned by the user.
+
+    Args:
+        current_user (dict): The authenticated user.
+
+    Returns:
+        dict: List of owned banners.
+    """
     users_collection = db_manager.get_collection("users")
     username = current_user["username"]
     user = await users_collection.find_one({"username": username}, {"banners_owned": 1, "_id": 0})
@@ -2958,6 +3373,15 @@ async def get_owned_banners(current_user: dict = Depends(enforce_all_lockdowns))
 
 @router.get("/shop/bundles/owned", tags=["shop"], summary="Get user's owned bundles")
 async def get_owned_bundles(current_user: dict = Depends(enforce_all_lockdowns)):
+    """
+    Get a list of bundles owned by the user.
+
+    Args:
+        current_user (dict): The authenticated user.
+
+    Returns:
+        dict: List of owned bundles.
+    """
     users_collection = db_manager.get_collection("users")
     username = current_user["username"]
     user = await users_collection.find_one({"username": username}, {"bundles_owned": 1, "_id": 0})

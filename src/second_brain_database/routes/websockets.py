@@ -1,4 +1,50 @@
-from typing import Optional
+"""
+# WebSocket Routes
+
+This module provides the **WebSocket endpoints** for real-time communication.
+It handles connection establishment, authentication, and message routing.
+
+## Domain Overview
+
+WebSockets enable bidirectional, real-time data flow for features like:
+- **Notifications**: Instant alerts for system events.
+- **Chat**: Real-time messaging (future scope).
+- **Live Updates**: Dashboard refreshes and progress bars.
+
+## Key Features
+
+### 1. Connection Management
+- **Authentication**: JWT-based handshake validation.
+- **Session Tracking**: Maps WebSocket connections to User IDs.
+- **Lifecycle**: Handles connect, disconnect, and keep-alive.
+
+### 2. Integration
+- **Connection Manager**: Uses the global `ConnectionManager` to store active sockets.
+- **Broadcasting**: Allows other services to push messages to specific users.
+
+## API Endpoints
+
+- `WS /ws` - Main WebSocket endpoint
+
+## Usage Examples
+
+### Client Connection (JavaScript)
+
+```javascript
+const token = "eyJhbG..."; // JWT Token
+const ws = new WebSocket(`wss://api.example.com/ws?token=${token}`);
+
+ws.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    console.log("Received update:", data);
+};
+```
+
+## Module Attributes
+
+Attributes:
+    router (APIRouter): FastAPI router for WebSocket endpoints
+"""
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 

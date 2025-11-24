@@ -1,9 +1,74 @@
-"""File upload routes with Docling integration.
+"""
+# Document Management Routes
 
-Handles:
-- Document uploads (PDF, DOCX, PPTX, etc.)
-- Async processing with Celery
-- Document search and retrieval
+This module provides the **REST API endpoints** for the Document Ingestion and Processing system.
+It handles file uploads, text extraction, and integration with the RAG (Retrieval-Augmented Generation) pipeline.
+
+## Domain Overview
+
+The Document System transforms raw files into structured, searchable knowledge:
+- **Ingestion**: Supports PDF, DOCX, PPTX, HTML, TXT, and MD formats.
+- **Processing**: Uses Docling and other tools to extract text, tables, and images.
+- **Indexing**: Chunks content and generates vector embeddings for semantic search.
+- **Async Pipeline**: Offloads heavy processing to Celery workers for scalability.
+
+## Key Features
+
+### 1. File Upload & Processing
+- **Sync/Async Modes**: Choose between immediate processing or background tasks.
+- **Image Extraction**: Optional extraction of embedded images for multimodal analysis.
+- **Table Extraction**: Specialized parsing for structured tabular data.
+
+### 2. Document Lifecycle
+- **Listing**: Retrieve processed documents with metadata.
+- **Retrieval**: Get full document content, including extracted text and images.
+- **Deletion**: Cascading delete removes document, chunks, and vector embeddings.
+
+### 3. RAG Integration
+- **Chunking**: Intelligent splitting of text into manageable segments.
+- **Vectorization**: Preparation of chunks for vector database insertion.
+
+## API Endpoints
+
+### Upload & Extraction
+- `POST /documents/upload` - Upload and process file
+- `POST /documents/extract-tables` - Extract tables only
+- `GET /documents/status/{task_id}` - Check async task status
+
+### Management
+- `GET /documents/list` - List documents
+- `GET /documents/{id}` - Get document details
+- `DELETE /documents/{id}` - Delete document
+
+### RAG Operations
+- `POST /documents/{id}/chunk` - Trigger chunking process
+
+## Usage Examples
+
+### Uploading a PDF (Async)
+
+```python
+with open("report.pdf", "rb") as f:
+    response = await client.post(
+        "/documents/upload",
+        files={"file": f},
+        data={"async_processing": True}
+    )
+task_id = response.json()["task_id"]
+```
+
+### Checking Processing Status
+
+```python
+status = await client.get(f"/documents/status/{task_id}")
+if status.json()["status"] == "SUCCESS":
+    print("Document ready!")
+```
+
+## Module Attributes
+
+Attributes:
+    router (APIRouter): FastAPI router with `/documents` prefix
 """
 
 import base64

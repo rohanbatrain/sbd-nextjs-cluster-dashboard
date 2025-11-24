@@ -1,4 +1,52 @@
-"""Authentication models for user registration, login, and data validation."""
+"""
+# Authentication Models
+
+This module defines the **Pydantic models** used for all authentication-related operations,
+including user registration, login, token management, and two-factor authentication.
+It enforces strict validation rules to ensure data integrity and security.
+
+## Domain Model Overview
+
+The authentication system is built around several core entities:
+
+- **User**: The primary identity, with separate models for Input (`UserIn`), Output (`UserOut`), and Database (`UserInDB`).
+- **Token**: JWT credentials (`Token`) for session management.
+- **Permanent Token**: Long-lived API keys (`PermanentToken`) for machine-to-machine access.
+- **2FA**: Models for Time-based One-Time Password (TOTP) setup and verification.
+
+## Key Features
+
+### 1. Robust Validation
+- **Password Strength**: Enforces complexity (length, case, digits, special chars).
+- **Input Sanitization**: Normalizes usernames and emails to lowercase.
+- **Plan Control**: Restricts new registrations to the 'free' plan.
+
+### 2. Security Best Practices
+- **Data Hiding**: `UserOut` automatically excludes sensitive fields (passwords, secrets).
+- **Audit Logging**: Dedicated models (`LoginLog`, `RegistrationLog`) for security auditing.
+
+## Usage Examples
+
+### Validating a New User Registration
+
+```python
+try:
+    user = UserIn(
+        username="john_doe",
+        email="john@example.com",
+        password="SecurePassword123!"
+    )
+except ValueError as e:
+    print(f"Validation failed: {e}")
+```
+
+## Module Attributes
+
+Attributes:
+    PASSWORD_MIN_LENGTH (int): Minimum required password length (8).
+    USERNAME_MIN_LENGTH (int): Minimum username length (3).
+    USERNAME_REGEX (str): Regex pattern for valid usernames.
+"""
 
 from datetime import datetime
 import re
@@ -34,21 +82,27 @@ class PasswordValidationResult(TypedDict):
 
 def validate_password_strength(password: str) -> bool:
     """
-    Validate password strength requirements.
+    Validates that a password meets the defined strength requirements.
 
-    Password must contain:
-    - At least 8 characters
-    - At least one uppercase letter
-    - At least one lowercase letter
-    - At least one digit
-    - At least one special character
+    This function performs a comprehensive check against multiple security criteria to ensure
+    user passwords are robust against brute-force and dictionary attacks.
+
+    **Requirements:**
+    1.  **Length**: Minimum 8 characters (`PASSWORD_MIN_LENGTH`).
+    2.  **Uppercase**: At least one uppercase letter (A-Z).
+    3.  **Lowercase**: At least one lowercase letter (a-z).
+    4.  **Digit**: At least one numeric digit (0-9).
+    5.  **Special Character**: At least one special character from `!@#$%^&*(),.?":{}|<>`.
 
     Args:
-        password (str): The password to validate.
+        password (str): The plain-text password to validate.
+
     Returns:
-        bool: True if password meets all requirements, False otherwise.
-    Side-effects:
-        Logs warnings for each failed requirement.
+        bool: `True` if the password meets all requirements, `False` otherwise.
+
+    Side Effects:
+        Logs a warning message with the specific reason for failure if validation fails.
+        This helps in debugging and monitoring password policy compliance.
     """
     if len(password) < PASSWORD_MIN_LENGTH:
         logger.warning("Password validation failed: too short")
@@ -70,16 +124,24 @@ def validate_password_strength(password: str) -> bool:
 
 class UserIn(BaseDocumentedModel):
     """
-    User input model for registration.
+    Input model for new user registration.
 
-    Validates username format, email format, and ensures password meets
-    minimum requirements. Username is automatically converted to lowercase
-    for consistency.
+    This model handles the validation and normalization of user data during the sign-up process.
+    It enforces strict rules on usernames, emails, and passwords to ensure system consistency
+    and security.
 
     **Validation Rules:**
-    - Username: 3-50 characters, alphanumeric with dashes/underscores only
-    - Email: Valid email format, automatically converted to lowercase
-    - Password: Minimum 8 characters with strength requirements
+    *   **Username**: Must be 3-50 characters long, containing only alphanumeric characters,
+        dashes, or underscores. Automatically converted to lowercase to ensure uniqueness.
+    *   **Email**: Must be a valid email format. Automatically converted to lowercase.
+    *   **Password**: Must meet strict strength requirements (length, complexity) as defined
+        in `validate_password_strength`.
+    *   **Plan**: Defaults to 'free'. Attempts to register with other plans will raise an error.
+    *   **Role**: Defaults to 'user'. Cannot be overridden during registration.
+
+    **Security Note:**
+    This model accepts a plain-text password. It should only be used in the registration endpoint
+    where the password will be immediately hashed before storage.
     """
 
     username: str = Field(
@@ -256,10 +318,25 @@ class UserOut(BaseDocumentedModel):
 
 class UserInDB(BaseModel):
     """
-    User database model representing the complete user document.
+    User database model representing the complete user document stored in MongoDB.
 
-    Contains all user fields including sensitive data like hashed passwords
-    and security-related fields for authentication tracking.
+    This model contains the **full state** of a user account, including sensitive security credentials
+    and internal tracking fields that are never exposed via the API. It serves as the source of truth
+    for user authentication and authorization.
+
+    **Sensitive Fields (Internal Only):**
+    *   **hashed_password**: The bcrypt hash of the user's password. Never store plain text.
+    *   **totp_secret**: The encrypted secret key for 2FA generation.
+    *   **backup_codes**: Hashed one-time codes for emergency account access.
+    *   **reset_blocklist**: List of used password reset tokens to prevent replay attacks.
+
+    **Security Tracking:**
+    *   **failed_login_attempts**: Counter for rate limiting and account locking.
+    *   **reset_whitelist**: List of active password reset tokens.
+
+    **Usage:**
+    This model is used exclusively by the `UserService` and `AuthService` for database interactions.
+    It should **never** be returned directly to the client. Use `UserOut` for API responses.
     """
 
     username: str
@@ -285,20 +362,26 @@ class UserInDB(BaseModel):
 
 class Token(BaseDocumentedModel):
     """
-    JWT token response model with refresh token support.
+    JWT token response model containing access and refresh tokens.
 
-    Contains both access and refresh tokens for authentication.
-    Returned after successful login, registration, or token refresh operations.
+    This model is returned upon successful authentication (login, registration, refresh).
+    It provides the client with the necessary credentials to access protected API endpoints.
 
-    **Usage:** Include the access_token in the Authorization header as:
-    `Authorization: Bearer <access_token>`
-
-    **Token Lifetimes:**
-    - Access Token: 15 minutes (short-lived for security)
-    - Refresh Token: 7 days (long-lived for UX)
+    **Token Structure:**
+    *   **access_token**: A short-lived (15 min) JWT used for API authorization.
+        Must be included in the `Authorization` header as `Bearer <token>`.
+    *   **refresh_token**: A long-lived (7 days) JWT used to obtain new access tokens
+        when the current one expires. This enables a seamless user experience without
+        frequent re-logins.
+    *   **token_type**: Always "bearer" for OAuth2 compatibility.
+    *   **expires_in**: The lifetime of the access token in seconds.
+    *   **refresh_expires_in**: The lifetime of the refresh token in seconds.
 
     **Refresh Flow:**
-    When access token expires (401), use refresh token at `/auth/refresh` to get new tokens.
+    1.  Client uses `access_token` for API requests.
+    2.  When `access_token` expires (401 Unauthorized), client sends `refresh_token`
+        to the `/auth/refresh` endpoint.
+    3.  Server validates `refresh_token` and issues a new pair of tokens.
     """
 
     access_token: str = Field(
@@ -340,9 +423,18 @@ class Token(BaseDocumentedModel):
 
 class TokenData(BaseModel):
     """
-    Token payload data extracted from JWT.
+    Internal model for decoded JWT payload data.
 
-    Used internally for token validation and user identification.
+    This model represents the structured data extracted from a validated JWT access token.
+    It is used throughout the application to identify the authenticated user associated
+    with the current request.
+
+    **Fields:**
+    *   **username**: The subject (`sub` claim) of the token, identifying the user.
+
+    **Usage:**
+    The `get_current_user` dependency decodes the bearer token into this model
+    before fetching the full user record from the database.
     """
 
     username: Optional[str] = None
@@ -350,45 +442,79 @@ class TokenData(BaseModel):
 
 class PasswordChangeRequest(BaseModel):
     """
-    Password change request model.
+    Request model for changing a user's password.
 
-    Contains the old password for verification and new password to set.
-    New password must meet the same strength requirements as registration.
+    This model requires both the current password (for verification) and the new password.
+    The new password must meet the same strict complexity requirements as registration.
+
+    **Validation:**
+    *   **old_password**: Verified against the stored hash in the database.
+    *   **new_password**: Must be at least 8 characters, with mix of case, numbers, and special chars.
+
+    **Security:**
+    Changing the password will invalidate all existing sessions (except the current one)
+    and revoke all refresh tokens to ensure account security.
     """
 
-    old_password: str
+    old_password: str = Field(..., description="Current password for verification")
     new_password: str = Field(
-        ..., min_length=PASSWORD_MIN_LENGTH, description="New password must be at least 8 characters"
+        ...,
+        min_length=PASSWORD_MIN_LENGTH,
+        description="New password. Must meet strength requirements (8+ chars, mixed case, special chars).",
+        example="NewSecurePassword456!",
     )
 
 
 class TwoFASetupRequest(BaseModel):
     """
-    Two-factor authentication setup request model.
+    Request model for initiating Two-Factor Authentication (2FA) setup.
 
-    Specifies the method to enable for 2FA.
+    **Supported Methods:**
+    *   **totp**: Time-based One-Time Password (e.g., Google Authenticator, Authy).
+        Generates a QR code for the user to scan.
+    *   **email**: (Future) Send OTP codes via email.
+    *   **passkey**: (Future) WebAuthn/FIDO2 passkey support.
+
+    **Flow:**
+    1. Client sends this request with desired method.
+    2. Server returns `TwoFASetupResponse` with secret/QR code.
+    3. Client verifies setup with `TwoFAVerifyRequest`.
     """
 
-    method: str  # 'totp', 'email', or 'passkey'
+    method: str = Field(..., description="The 2FA method to enable.", example="totp")
 
 
 class TwoFAVerifyRequest(BaseModel):
     """
-    Two-factor authentication verification request model.
+    Request model for verifying and finalizing 2FA setup.
 
-    Contains the method and code for verification.
+    This step confirms that the user has successfully configured their authenticator app
+    and can generate valid codes.
+
+    **Validation:**
+    *   **code**: Must be a valid 6-digit TOTP code generated from the secret provided in setup.
+    *   **method**: Must match the method requested in setup.
+
+    **Outcome:**
+    On success, 2FA is enabled for the account and backup codes are generated/returned.
     """
 
-    method: str
-    code: str
+    method: str = Field(..., description="The 2FA method being verified.", example="totp")
+    code: str = Field(..., description="The 6-digit verification code.", example="123456")
 
 
 class TwoFAStatus(BaseModel):
     """
-    Two-factor authentication status response model.
+    Response model for current 2FA configuration status.
 
-    Indicates whether 2FA is enabled and lists the enabled methods.
-    If backup_codes is present, these are the one-time backup codes shown only after first successful 2FA verification.
+    Provides the client with the current security state of the account regarding 2FA.
+
+    **Fields:**
+    *   **enabled**: Global flag indicating if 2FA is enforced for login.
+    *   **methods**: List of active 2FA methods (e.g., `['totp']`).
+    *   **pending**: If `True`, setup was started but not verified.
+    *   **backup_codes**: **Only** returned immediately after successful setup/verification.
+        Otherwise `None`.
     """
 
     enabled: bool
@@ -494,7 +620,20 @@ class LoginRequest(BaseDocumentedModel):
 
 class LoginLog(BaseModel):
     """
-    Model for logging login attempts.
+    Audit log model for tracking user login attempts.
+
+    This model captures detailed information about every login attempt (successful or failed)
+    to support security monitoring, threat detection, and compliance auditing.
+
+    **Captured Data:**
+    *   **Context**: Timestamp, IP address, and User Agent string.
+    *   **Identity**: Username and email attempted.
+    *   **Result**: Success/Failure status and detailed reason for failure.
+    *   **Security**: MFA status (whether 2FA was challenged/completed).
+
+    **Usage:**
+    Instances of this model are asynchronously written to the `auth_logs` collection
+    via the `AuthService.log_login_attempt` method.
     """
 
     timestamp: datetime
@@ -509,7 +648,19 @@ class LoginLog(BaseModel):
 
 class RegistrationLog(BaseModel):
     """
-    Model for logging registration attempts.
+    Audit log model for tracking new user registration events.
+
+    This model records the details of every account creation attempt, helping to monitor
+    growth, detect spam/bot registrations, and troubleshoot signup issues.
+
+    **Captured Data:**
+    *   **Context**: Timestamp, IP address, and User Agent.
+    *   **Identity**: Registered username and email.
+    *   **Configuration**: Selected plan and assigned role.
+    *   **Result**: Success/Failure status and failure reason (e.g., "username_taken").
+
+    **Usage:**
+    Written to the `auth_logs` collection immediately after a registration attempt is processed.
     """
 
     timestamp: datetime
@@ -528,19 +679,23 @@ class RegistrationLog(BaseModel):
 
 class PermanentTokenRequest(BaseDocumentedModel):
     """
-    Request model for creating a new permanent token.
+    Request model for creating a new permanent API token.
 
-    Permanent tokens provide long-lived authentication for integrations, automation,
-    and server-to-server communication. They don't expire unless manually revoked.
+    Permanent tokens are distinct from regular user sessions in that they do not expire
+    by default and are intended for machine-to-machine communication.
 
     **Use Cases:**
-    - CI/CD pipeline authentication
-    - Third-party application integrations
-    - Automated scripts and background jobs
-    - Server-to-server communication
+    *   **CI/CD Pipelines**: Authenticating deployment scripts (e.g., GitHub Actions).
+    *   **Integrations**: Connecting third-party services (e.g., Slack bots, Zapier).
+    *   **Background Jobs**: Long-running processes that need API access.
 
-    **Security:** Tokens are generated with cryptographically secure randomness
-    and stored as SHA-256 hashes in the database.
+    **Security Features:**
+    *   **IP Restrictions**: Optional allowlist of IP addresses/CIDRs to restrict usage.
+    *   **Expiration**: Optional expiration date for temporary access.
+    *   **Auditing**: All token usage is logged and tracked.
+
+    **Note:** The generated token is cryptographically secure and stored as a hash.
+    The plain-text token is only shown once upon creation.
     """
 
     description: Optional[str] = Field(

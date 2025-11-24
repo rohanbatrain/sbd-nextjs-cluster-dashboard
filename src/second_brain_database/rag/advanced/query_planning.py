@@ -1,9 +1,19 @@
-"""
-Advanced RAG Features - Intelligent Query Planning
+"""Advanced RAG Features - Intelligent Query Planning.
 
-Sophisticated query planning system that analyzes complex queries, breaks them
-into sub-queries, plans optimal retrieval strategies, and orchestrates 
-multi-step query execution for complex information needs.
+This module implements a sophisticated query planning system designed to handle complex,
+multi-faceted information needs. It analyzes incoming queries, decomposes them into
+manageable sub-queries, and orchestrates their execution using optimal retrieval strategies.
+
+The system supports various query types and execution strategies:
+- **Query Decomposition**: Breaking down complex questions into atomic sub-queries.
+- **Dependency Management**: Handling execution order where one query depends on another's result.
+- **Strategy Selection**: Automatically choosing between direct, iterative, or hierarchical retrieval.
+- **Result Synthesis**: Combining results from multiple sub-queries into a coherent answer.
+
+Key Components:
+- `IntelligentQueryPlanner`: The main engine for analysis and orchestration.
+- `QueryPlan`: A structured blueprint for executing a complex query.
+- `QueryType` & `QueryStrategy`: Enums defining the classification and execution logic.
 """
 
 import asyncio
@@ -21,47 +31,98 @@ logger = get_logger()
 
 
 class QueryType(str, Enum):
-    """Types of queries the system can handle."""
-    SIMPLE = "simple"                    # Direct factual query
-    COMPLEX = "complex"                  # Multi-part or analytical query
-    COMPARATIVE = "comparative"          # Compare entities or concepts
-    TEMPORAL = "temporal"               # Time-based queries
-    CAUSAL = "causal"                   # Cause-effect relationships
-    PROCEDURAL = "procedural"           # How-to or step-by-step
-    ANALYTICAL = "analytical"           # Requires analysis/synthesis
-    MULTI_DOMAIN = "multi_domain"       # Spans multiple knowledge domains
+    """Enumeration of supported query types.
+
+    Classifies the nature of the user's information need to determine the best
+    processing strategy.
+
+    Attributes:
+        SIMPLE: Direct factual query requiring single-step retrieval.
+        COMPLEX: Multi-part query requiring decomposition.
+        COMPARATIVE: Request to compare two or more entities or concepts.
+        TEMPORAL: Query involving time, history, or chronological order.
+        CAUSAL: Query asking for reasons, causes, or effects.
+        PROCEDURAL: How-to or step-by-step instructions.
+        ANALYTICAL: Deep analysis or evaluation of a topic.
+        MULTI_DOMAIN: Query spanning multiple distinct knowledge domains.
+    """
+    SIMPLE = "simple"
+    COMPLEX = "complex"
+    COMPARATIVE = "comparative"
+    TEMPORAL = "temporal"
+    CAUSAL = "causal"
+    PROCEDURAL = "procedural"
+    ANALYTICAL = "analytical"
+    MULTI_DOMAIN = "multi_domain"
 
 
 class QueryStrategy(str, Enum):
-    """Query execution strategies."""
-    DIRECT = "direct"                    # Single retrieval step
-    DECOMPOSED = "decomposed"           # Break into sub-queries
-    ITERATIVE = "iterative"             # Refine based on results
-    HIERARCHICAL = "hierarchical"       # Top-down query refinement
-    EXPLORATORY = "exploratory"         # Broad then narrow search
+    """Enumeration of query execution strategies.
+
+    Defines the structural approach to executing a query plan.
+
+    Attributes:
+        DIRECT: Single retrieval step (best for Simple queries).
+        DECOMPOSED: Break into independent or dependent sub-queries.
+        ITERATIVE: Refine search based on initial results (feedback loop).
+        HIERARCHICAL: Top-down approach (Overview -> Details).
+        EXPLORATORY: Broad search followed by focused analysis.
+    """
+    DIRECT = "direct"
+    DECOMPOSED = "decomposed"
+    ITERATIVE = "iterative"
+    HIERARCHICAL = "hierarchical"
+    EXPLORATORY = "exploratory"
 
 
 @dataclass
 class SubQuery:
-    """A sub-query component of a complex query."""
+    """A single unit of work within a larger query plan.
+
+    Represents an atomic query that can be executed against the vector store.
+
+    Attributes:
+        id (str): Unique identifier for the sub-query.
+        text (str): The actual query text to be executed.
+        query_type (QueryType): The type of this specific sub-query.
+        priority (int): Execution priority (lower number = higher priority).
+        depends_on (List[str]): IDs of other sub-queries that must complete first.
+        expected_result_type (str): Hint about the expected output format.
+        metadata (Dict[str, Any]): Additional context or parameters.
+    """
     id: str
     text: str
     query_type: QueryType
     priority: int
-    depends_on: List[str]  # IDs of sub-queries this depends on
+    depends_on: List[str]
     expected_result_type: str
     metadata: Dict[str, Any]
 
 
 @dataclass
 class QueryPlan:
-    """Execution plan for a query."""
+    """A comprehensive execution plan for a complex query.
+
+    Contains all the information needed to orchestrate the retrieval and
+    synthesis process.
+
+    Attributes:
+        plan_id (str): Unique identifier for the plan.
+        original_query (str): The user's original input query.
+        query_type (QueryType): The detected classification of the query.
+        strategy (QueryStrategy): The selected execution strategy.
+        sub_queries (List[SubQuery]): List of all sub-queries to execute.
+        execution_order (List[str]): Ordered list of sub-query IDs defining the workflow.
+        estimated_complexity (float): Heuristic score of plan complexity (0.0-1.0).
+        estimated_duration_seconds (float): Estimated time to complete execution.
+        metadata (Dict[str, Any]): Plan metadata (creation time, user prefs, etc.).
+    """
     plan_id: str
     original_query: str
     query_type: QueryType
     strategy: QueryStrategy
     sub_queries: List[SubQuery]
-    execution_order: List[str]  # Ordered list of sub-query IDs
+    execution_order: List[str]
     estimated_complexity: float
     estimated_duration_seconds: float
     metadata: Dict[str, Any]
@@ -69,12 +130,26 @@ class QueryPlan:
 
 @dataclass
 class QueryExecution:
-    """Track execution of a query plan."""
+    """State tracking for a running query plan.
+
+    Maintains the runtime state, results, and metrics of a plan execution.
+
+    Attributes:
+        plan_id (str): ID of the plan being executed.
+        status (str): Current status ('running', 'completed', 'failed').
+        current_step (int): Index of the current step in execution_order.
+        completed_sub_queries (List[str]): IDs of completed sub-queries.
+        results (Dict[str, Any]): Map of sub-query IDs to their results.
+        start_time (datetime): Timestamp when execution started.
+        end_time (Optional[datetime]): Timestamp when execution finished.
+        total_chunks_retrieved (int): Total number of document chunks fetched.
+        error_message (Optional[str]): Error details if execution failed.
+    """
     plan_id: str
-    status: str  # "running", "completed", "failed"
+    status: str
     current_step: int
     completed_sub_queries: List[str]
-    results: Dict[str, Any]  # Results by sub-query ID
+    results: Dict[str, Any]
     start_time: datetime
     end_time: Optional[datetime]
     total_chunks_retrieved: int
@@ -82,11 +157,17 @@ class QueryExecution:
 
 
 class IntelligentQueryPlanner:
-    """
-    Intelligent query planning system for complex RAG operations.
-    
-    Analyzes queries, creates execution plans, and orchestrates multi-step
-    retrieval and synthesis for sophisticated information needs.
+    """Intelligent query planning system for complex RAG operations.
+
+    This class serves as the brain of the advanced RAG system. It uses heuristics
+    and pattern matching (and potentially LLMs) to understand the structure of a
+    user's question and design a bespoke retrieval strategy.
+
+    Attributes:
+        max_sub_queries (int): Hard limit on sub-queries to prevent explosion.
+        max_complexity (float): Threshold for rejecting overly complex plans.
+        parallel_execution (bool): Whether to run independent sub-queries concurrently.
+        query_patterns (Dict[QueryType, List[str]]): Regex patterns for query classification.
     """
     
     def __init__(
@@ -95,13 +176,12 @@ class IntelligentQueryPlanner:
         max_complexity: float = 1.0,
         parallel_execution: bool = True
     ):
-        """
-        Initialize query planner.
-        
+        """Initialize the query planner with configuration limits.
+
         Args:
-            max_sub_queries: Maximum number of sub-queries to generate
-            max_complexity: Maximum complexity threshold for queries
-            parallel_execution: Whether to execute independent queries in parallel
+            max_sub_queries (int): Maximum number of sub-queries to generate. Defaults to 10.
+            max_complexity (float): Maximum complexity threshold. Defaults to 1.0.
+            parallel_execution (bool): Enable parallel execution. Defaults to True.
         """
         self.max_sub_queries = max_sub_queries
         self.max_complexity = max_complexity
@@ -149,15 +229,16 @@ class IntelligentQueryPlanner:
         logger.info("Initialized intelligent query planner")
     
     async def analyze_query(self, query: str, context: Optional[Dict[str, Any]] = None) -> QueryType:
-        """
-        Analyze a query to determine its type and complexity.
-        
+        """Analyze a query string to determine its semantic type.
+
+        Uses regex pattern matching and heuristics to classify the query.
+
         Args:
-            query: The query string to analyze
-            context: Optional context about the query
-            
+            query (str): The user's input query string.
+            context (Optional[Dict[str, Any]]): Additional context (e.g., conversation history).
+
         Returns:
-            Detected query type
+            QueryType: The detected classification of the query.
         """
         try:
             query_lower = query.lower()
@@ -189,16 +270,21 @@ class IntelligentQueryPlanner:
         query_type: Optional[QueryType] = None,
         user_preferences: Optional[Dict[str, Any]] = None
     ) -> QueryPlan:
-        """
-        Create an execution plan for a query.
-        
+        """Generate a comprehensive execution plan for the given query.
+
+        This is the core planning method that orchestrates the decomposition and
+        strategy selection process.
+
         Args:
-            query: The original query
-            query_type: Override detected query type
-            user_preferences: User preferences for planning
-            
+            query (str): The original query text.
+            query_type (Optional[QueryType]): Force a specific query type override.
+            user_preferences (Optional[Dict[str, Any]]): User settings affecting planning.
+
         Returns:
-            Detailed query execution plan
+            QueryPlan: A fully constructed query plan ready for execution.
+
+        Raises:
+            RAGError: If plan creation fails due to internal errors.
         """
         try:
             # Detect query type if not provided
@@ -254,17 +340,22 @@ class IntelligentQueryPlanner:
         llm_service,
         context: Optional[Dict[str, Any]] = None
     ) -> QueryExecution:
-        """
-        Execute a query plan using provided services.
-        
+        """Execute a generated query plan.
+
+        Orchestrates the execution of sub-queries, handling dependencies and
+        aggregating results.
+
         Args:
-            plan: The query plan to execute
-            vector_store_service: Vector store service for retrieval
-            llm_service: LLM service for generation
-            context: Optional execution context
-            
+            plan (QueryPlan): The plan to execute.
+            vector_store_service: Service for retrieving documents.
+            llm_service: Service for generating text/answers.
+            context (Optional[Dict[str, Any]]): Execution context (e.g., user_id).
+
         Returns:
-            Query execution result
+            QueryExecution: The final execution state containing all results.
+
+        Raises:
+            RAGError: If execution fails critically.
         """
         try:
             logger.info(f"Starting execution of query plan {plan.plan_id}")

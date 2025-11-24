@@ -30,10 +30,37 @@ logger = get_logger(prefix="[ClubManager]")
 
 class ClubManager:
     """
-    Manager for club operations with university-level isolation.
+    Manages university clubs with multi-level hierarchy and role-based access.
 
-    Handles university creation, club management, member operations, and
-    university-level permissions.
+    Provides complete club ecosystem management including university verification,
+    club creation, vertical (sub-team) organization, and member management.
+
+    **Hierarchy:**
+    - **University**: Top-level organization (requires admin approval)
+    - **Club**: Student organization within university
+    - **Vertical**: Sub-team within club (e.g., Technical, Marketing)
+    - **Member**: User with specific role in club/vertical
+
+    **Features:**
+    - **University management**: Domain-based verification, admin approval
+    - **Club creation**: Category-based, slug generation, member limits
+    - **Vertical organization**: Sub-teams with dedicated leads
+    - **Member invitations**: Role-based with acceptance workflow
+    - **Access control**: Hierarchical role permissions
+    - **Caching**: Redis-based university and club caching
+
+    **Roles Hierarchy:**
+    - **Owner**: Full control, can delete club
+    - **Admin**: Manage members, settings, verticals
+    - **Lead**: Manage specific vertical
+    - **Member**: Participate in club activities
+
+    **Collections:**
+    - `universities`: University metadata and verification status
+    - `clubs`: Club information and settings
+    - `club_verticals`: Sub-teams within clubs
+    - `club_members`: Member roles and vertical assignments
+    - `club_analytics`: Engagement and activity metrics
     """
 
     def __init__(self, db_manager=None, redis_manager=None):

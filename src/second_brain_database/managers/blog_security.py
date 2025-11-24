@@ -26,12 +26,28 @@ logger = get_logger(prefix="[BlogSecurity]")
 
 class BlogRateLimiter:
     """
-    Rate limiter for blog API endpoints.
+    Provides Redis-based rate limiting for blog API endpoints with sliding windows.
 
-    Supports different rate limits for different operations:
-    - Post creation: 10 per hour per user
-    - Comment creation: 30 per hour per user/IP
-    - API access: 1000 per hour per user
+    Implements different rate limits for various operations to prevent abuse
+    while maintaining good user experience.
+
+    **Rate Limits:**
+    - **Post creation**: 10 per hour per user
+    - **Comment creation**: 30 per hour per user/IP
+    - **API access**: 1000 per hour per user
+    - **Website access**: 10,000 per hour per IP
+
+    **Implementation:**
+    - Uses Redis sorted sets for efficient sliding window tracking
+    - Automatically removes expired entries
+    - Returns detailed rate limit info (current count, limit, reset time)
+    - Gracefully handles Redis failures (allows request on error)
+
+    **Response Headers:**
+    - `X-RateLimit-Limit`: Maximum requests allowed
+    - `X-RateLimit-Remaining`: Requests remaining in window
+    - `X-RateLimit-Reset`: Unix timestamp when limit resets
+    - `Retry-After`: Seconds until retry allowed (on 429 error)
     """
 
     def __init__(self, redis_manager=None):
@@ -123,13 +139,33 @@ class BlogRateLimiter:
 
 class BlogXSSProtection:
     """
-    XSS protection and input sanitization for blog content.
+    Provides comprehensive XSS protection and input sanitization for blog content.
 
-    Provides comprehensive protection against:
-    - Script injection
-    - HTML injection
-    - Event handler injection
-    - CSS injection
+    Protects against various injection attacks while allowing safe HTML for rich content.
+
+    **Protection Against:**
+    - **Script injection**: `<script>` tags and javascript: URLs
+    - **HTML injection**: Dangerous tags (iframe, object, embed, form)
+    - **Event handlers**: onclick, onload, etc.
+    - **CSS injection**: style attributes and expression()
+    - **Data URIs**: data: and vbscript: schemes
+
+    **Sanitization Modes:**
+    - **No HTML**: Escapes all HTML characters (for titles, plain text)
+    - **Basic HTML**: Allows safe tags (p, strong, em, a, img, etc.)
+
+    **Allowed Tags:**
+    - Text formatting: p, br, strong, b, em, i, u
+    - Headings: h1-h6
+    - Lists: ul, ol, li
+    - Other: blockquote, code, pre, a, img, hr, div, span
+
+    **Allowed Attributes:**
+    - href, src, alt, title, class, id, target, rel
+
+    **URL Validation:**
+    - Only allows http:// and https:// schemes
+    - Blocks javascript:, data:, file:, ftp: schemes
     """
 
     def __init__(self):
@@ -278,13 +314,34 @@ class BlogXSSProtection:
 
 class BlogAuditLogger:
     """
-    Audit logging for blog security events.
+    Provides comprehensive audit logging for blog security events and compliance.
 
-    Logs security-relevant events for compliance and monitoring:
-    - Authentication attempts
-    - Content modifications
-    - Permission changes
-    - Suspicious activities
+    Logs all security-relevant events for monitoring, compliance, and forensics.
+
+    **Event Types:**
+    - **Authentication events**: Login, logout, token validation
+    - **Content events**: Post creation, updates, deletions
+    - **Security events**: XSS attempts, rate limit violations, suspicious activity
+    - **Permission events**: Role changes, access denials
+
+    **Log Levels:**
+    - **INFO**: Normal operations (auth success, content changes)
+    - **WARNING**: Security events (low/medium severity)
+    - **ERROR**: Critical security events (high/critical severity)
+
+    **Logged Information:**
+    - Timestamp (UTC)
+    - Event type and severity
+    - User ID and website ID
+    - IP address and user agent
+    - Action performed
+    - Additional context and details
+
+    **Use Cases:**
+    - Security monitoring and alerting
+    - Compliance reporting (GDPR, SOC 2)
+    - Forensic analysis after incidents
+    - User activity tracking
     """
 
     def __init__(self):
@@ -406,13 +463,35 @@ class BlogAuditLogger:
 
 class BlogSecurityMiddleware(BaseHTTPMiddleware):
     """
-    FastAPI middleware for blog security features.
+    FastAPI middleware providing comprehensive security for blog endpoints.
 
-    Provides:
-    - Rate limiting
-    - Request logging
-    - Security headers
-    - Basic attack detection
+    Integrates rate limiting, request logging, security headers, and attack detection
+    into a single middleware layer.
+
+    **Features:**
+    - **Rate limiting**: Automatic enforcement of rate limits
+    - **Security headers**: CSP, X-Frame-Options, X-XSS-Protection, etc.
+    - **Request logging**: Logs slow requests and errors
+    - **Attack detection**: Basic detection of suspicious patterns
+    - **Client IP detection**: Handles X-Forwarded-For and X-Real-IP headers
+
+    **Security Headers:**
+    - `Content-Security-Policy`: Restricts resource loading
+    - `X-Content-Type-Options`: Prevents MIME sniffing
+    - `X-Frame-Options`: Prevents clickjacking
+    - `X-XSS-Protection`: Enables browser XSS filter
+    - `Referrer-Policy`: Controls referrer information
+    - `Permissions-Policy`: Restricts browser features
+
+    **Rate Limit Responses:**
+    - Returns 429 Too Many Requests on limit exceeded
+    - Includes Retry-After and X-RateLimit-* headers
+    - Logs violations for monitoring
+
+    **Error Handling:**
+    - Gracefully handles middleware errors
+    - Returns generic 500 error to avoid information leakage
+    - Logs all errors for debugging
     """
 
     def __init__(self, app, rate_limiter=None, audit_logger=None):

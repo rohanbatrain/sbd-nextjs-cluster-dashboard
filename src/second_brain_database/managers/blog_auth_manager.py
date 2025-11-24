@@ -23,10 +23,33 @@ logger = get_logger(prefix="[Blog Auth Manager]")
 
 class BlogAuthManager:
     """
-    Manager for blog website authentication and authorization.
+    Manages website-scoped authentication and role-based authorization for blogs.
 
-    Handles website-scoped JWT tokens, role-based access control, and
-    website-level permission checking.
+    Extends the core JWT authentication system to support multi-tenant blog operations
+    with website-level access control and role hierarchies.
+
+    **Features:**
+    - **Website-scoped tokens**: JWT tokens with website context
+    - **Role-based access**: Hierarchical role system (Owner > Admin > Editor > Author > Viewer)
+    - **Token caching**: Redis-based token validation caching
+    - **Permission checking**: Website-level permission verification
+    - **Token invalidation**: Revoke access when needed
+
+    **Token Claims:**
+    - `sub`: Username
+    - `user_id`: User ID
+    - `website_id`: Website ID
+    - `role`: Website role
+    - `token_type`: "website"
+    - `exp`: Expiration timestamp
+    - `iat`: Issued at timestamp
+
+    **Role Hierarchy:**
+    - Owner (4): Full control, can delete website
+    - Admin (3): Manage members, settings
+    - Editor (2): Publish/edit all posts
+    - Author (1): Create/edit own posts
+    - Viewer (0): Read-only access
     """
 
     def __init__(self):

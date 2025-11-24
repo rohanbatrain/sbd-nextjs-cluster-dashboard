@@ -1,7 +1,48 @@
 """
-Dashboard API routes.
+# Dashboard Routes
 
-FastAPI routes for dashboard preferences, widget management, and aggregated data.
+This module provides the **REST API endpoints** for Dashboard Customization.
+It allows users to manage their dashboard layouts, add/remove widgets, and save preferences.
+
+## Domain Overview
+
+Dashboards are the landing page for users, providing a personalized overview.
+This module supports:
+- **Persistence**: Saving layouts to MongoDB (`dashboard_preferences` collection).
+- **Context Awareness**: Different layouts for Personal vs. Family views.
+- **Widget Management**: CRUD operations for dashboard widgets.
+
+## Key Features
+
+### 1. Layout Management
+- **Retrieval**: Fetch layout by context (e.g., `/dashboard/preferences/personal`).
+- **Updates**: Save entire layout configurations.
+- **Auto-Positioning**: Automatically place new widgets in available space.
+
+### 2. Widget Operations
+- **Add**: Create new widget instances.
+- **Update**: Resize, move, or reconfigure widgets.
+- **Delete**: Remove widgets from the layout.
+
+## API Endpoints
+
+- `GET /dashboard/preferences/{context}` - Get layout
+- `PUT /dashboard/preferences/{context}` - Save layout
+- `POST /dashboard/widgets` - Add widget
+- `PUT /dashboard/widgets/{id}` - Update widget
+- `DELETE /dashboard/widgets/{id}` - Remove widget
+
+## Usage Example
+
+### Adding a Widget
+
+```python
+await client.post("/dashboard/widgets", json={
+    "context": "personal",
+    "widget_type": "weather",
+    "settings": {"city": "New York"}
+})
+```
 """
 
 from datetime import datetime, timezone

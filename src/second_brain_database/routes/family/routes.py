@@ -1,13 +1,76 @@
 """
-Family management routes for user relationships and shared resources.
+# Family Management Routes
 
-This module provides REST API endpoints for family management including:
-- Family creation and management
-- Member invitations and relationship management
-- SBD token account integration
-- Family limits and usage tracking
+This module provides the core **REST API endpoints** for the Family Hub system.
+It handles the lifecycle of family units, member management, and shared financial resources.
 
-All endpoints require authentication and follow the established security patterns.
+## Domain Overview
+
+The Family Hub is a central feature allowing users to organize into groups for:
+- **Shared Identity**: A unified family profile and name.
+- **Resource Pooling**: Shared SBD token wallet ("Family Account").
+- **Role Management**: Administrators (Parents) and Members (Children).
+- **Financial Control**: Spending limits, purchase requests, and allowances.
+
+## Key Features
+
+### 1. Family Lifecycle
+- **Creation**: Users can create new families (limit 1 per user by default).
+- **Invitations**: Secure email/username-based invitation system with expiration.
+- **Roles**: Granular permissions for Admins (manage settings, approve purchases) vs Members.
+
+### 2. Shared Wallet & Economy
+- **Virtual Account**: Each family gets a `family_[name]` SBD token account.
+- **Purchase Requests**: Members request items; Admins approve/deny.
+- **Spending Limits**: Configurable daily/weekly limits per member.
+- **Allowances**: Automated token distribution schedules.
+
+### 3. Security & Compliance
+- **Rate Limiting**: Strict limits on creation and invitations to prevent abuse.
+- **Audit Logging**: All financial and administrative actions are logged.
+- **Lockdown Integration**: Fully integrated with IP and User-Agent security policies.
+
+## API Endpoints
+
+### Core Management
+- `POST /family/create` - Create a new family unit
+- `GET /family/my-families` - List user's families
+- `POST /family/{id}/invite` - Invite new members
+
+### Wallet & Finance
+- `GET /family/wallet/purchase-requests` - View pending requests
+- `POST /family/wallet/purchase-requests/{id}/approve` - Approve spending
+- `POST /family/wallet/purchase-requests/{id}/deny` - Reject spending
+
+### Invitations
+- `GET /family/my-invitations` - View received invites
+- `POST /family/invitations/{id}/respond` - Accept or decline
+
+## Usage Examples
+
+### Creating a Family
+
+```python
+response = await client.post("/family/create", json={
+    "name": "The Smiths"
+})
+family_id = response.json()["family_id"]
+```
+
+### Approving a Purchase (Admin)
+
+```python
+# Admin approves a request for 500 tokens
+response = await client.post(
+    f"/family/wallet/purchase-requests/{request_id}/approve"
+)
+assert response.status_code == 200
+```
+
+## Module Attributes
+
+Attributes:
+    router (APIRouter): FastAPI router with `/family` prefix
 """
 
 from datetime import datetime
@@ -100,15 +163,29 @@ async def create_family(
 
     The user automatically becomes the family administrator and can invite other members.
     A virtual SBD token account is created for the family with the format "family_[name]".
+    This account is used for shared purchases and subscriptions.
 
-    **Rate Limiting:** 5 requests per hour per user
+    **Rate Limiting:**
+    5 requests per hour per user.
 
     **Requirements:**
-    - User must not have reached their maximum family limit
-    - Family name must be unique (if provided)
+    - User must not have reached their maximum family limit (default: 1).
+    - Family name must be unique within the system (if provided).
+    - User must be authenticated.
 
-    **Returns:**
-    - Family information including ID, name, and SBD account details
+    Args:
+        request (Request): The HTTP request object (used for rate limiting and context).
+        family_request (CreateFamilyRequest): The family creation details (name).
+        current_user (dict): The authenticated user.
+
+    Returns:
+        FamilyResponse: The created family information including ID, name, and SBD account details.
+
+    Raises:
+        HTTPException(403): If the user has reached their family limit.
+        HTTPException(400): If the family name is invalid or already taken.
+        HTTPException(429): If the rate limit is exceeded.
+        HTTPException(500): If an unexpected error occurs.
     """
     user_id = str(current_user["_id"])
 
@@ -225,14 +302,22 @@ async def get_my_families(
     """
     Get all families that the current user belongs to.
 
-    Returns comprehensive family information including the user's role,
-    SBD account details, and member statistics.
+    Retrieves comprehensive family information including the user's role (admin/member),
+    the family's SBD account details, and current member statistics.
 
-    **Rate Limiting:** 20 requests per hour per user
+    **Rate Limiting:**
+    20 requests per hour per user.
 
-    **Returns:**
-    - List of families with detailed information
-    - Empty list if user belongs to no families
+    Args:
+        request (Request): The HTTP request object.
+        current_user (dict): The authenticated user.
+
+    Returns:
+        List[FamilyResponse]: A list of families with detailed information.
+                              Returns an empty list if the user belongs to no families.
+
+    Raises:
+        HTTPException(500): If there is an error retrieving family information.
     """
     user_id = str(current_user["_id"])
 
@@ -300,9 +385,28 @@ async def get_purchase_requests(
     current_user: dict = Depends(enforce_all_lockdowns),
 ):
     """
-    Get purchase requests for a family.
-    - Admins can see all requests for their family.
-    - Members can only see their own requests.
+    Retrieve pending purchase requests for a specific family.
+
+    This endpoint allows family members to view purchase requests.
+    Administrators can see all requests within the family, while regular members can only see their own.
+
+    **Access Control:**
+    - **Admins:** Can view all purchase requests for the family.
+    - **Members:** Can only view their own purchase requests.
+
+    **Use Cases:**
+    - Admins can monitor and manage pending purchases.
+    - Members can track the status of their own requests.
+
+    Args:
+        family_id (str): The ID of the family.
+        current_user (dict): The authenticated user.
+
+    Returns:
+        List[PurchaseRequestResponse]: A list of pending purchase requests.
+
+    Raises:
+        HTTPException(400): If there is an error retrieving requests (e.g., invalid family ID).
     """
     user_id = str(current_user["_id"])
     try:
@@ -339,8 +443,30 @@ async def approve_purchase_request(
 ):
     """
     Approve a family member's purchase request.
-    - Only admins can approve requests.
-    - Approving a request will trigger the purchase and deduct tokens from the family wallet.
+
+    This endpoint allows a family administrator to approve a pending purchase request.
+    Approving the request will trigger the purchase of the item and deduct the corresponding
+    amount of SBD tokens from the family wallet.
+
+    **Access Control:**
+    - Only family administrators can approve purchase requests.
+
+    **Side Effects:**
+    - Deducts SBD tokens from the family account.
+    - Grants ownership of the item to the requesting user (or family).
+    - Sends a notification to the requesting user.
+
+    Args:
+        request_id (str): The ID of the purchase request to approve.
+        request (Request): The HTTP request object.
+        current_user (dict): The authenticated user (must be an admin).
+
+    Returns:
+        PurchaseRequestResponse: The approved purchase request details.
+
+    Raises:
+        HTTPException(403): If the user is not a family administrator.
+        HTTPException(400): If the request is invalid, expired, or funds are insufficient.
     """
     admin_id = str(current_user["_id"])
     req_id = str(uuid.uuid4())
@@ -387,7 +513,25 @@ async def deny_purchase_request(
 ):
     """
     Deny a family member's purchase request.
-    - Only admins can deny requests.
+
+    This endpoint allows a family administrator to deny a pending purchase request.
+    A reason for the denial can be provided, which will be visible to the member who made the request.
+
+    **Access Control:**
+    - Only family administrators can deny purchase requests.
+
+    Args:
+        request_id (str): The ID of the purchase request to deny.
+        request (Request): The HTTP request object.
+        body (DenyPurchaseRequest): The denial details (reason).
+        current_user (dict): The authenticated user (must be an admin).
+
+    Returns:
+        PurchaseRequestResponse: The denied purchase request details.
+
+    Raises:
+        HTTPException(403): If the user is not a family administrator.
+        HTTPException(400): If the request is invalid or already processed.
     """
     admin_id = str(current_user["_id"])
     req_id = str(uuid.uuid4())
@@ -488,8 +632,26 @@ async def get_my_invitations(
     """
     Get invitations received by the current authenticated user.
 
-    Returns a list of invitations sent to the user (by invitee_user_id or invitee_email).
+    Retrieves a list of invitations sent to the user, matching either by user ID or email address.
     Includes complete family and inviter information for each invitation.
+    Supports filtering by invitation status (pending, accepted, declined, etc.).
+
+    **Rate Limiting:**
+    60 requests per hour per user.
+
+    Args:
+        request (Request): The HTTP request object.
+        current_user (dict): The authenticated user.
+        status (str, optional): Filter by invitation status.
+                                Must be one of: 'pending', 'accepted', 'declined', 'expired', 'cancelled'.
+
+    Returns:
+        List[ReceivedInvitationResponse]: A list of received invitations.
+
+    Raises:
+        HTTPException(400): If the status filter is invalid.
+        HTTPException(429): If the rate limit is exceeded.
+        HTTPException(500): If there is an error retrieving invitations.
     """
     user_id = str(current_user["_id"])
     user_email = current_user.get("email")
@@ -604,21 +766,34 @@ async def invite_family_member(
     current_user: dict = Depends(enforce_all_lockdowns),
 ) -> InvitationResponse:
     """
-    Invite a user to join a family by email address or username.
+    Invite a user to join a family.
 
-    Sends an email invitation to the specified user with accept/decline links.
+    Sends an email invitation to the specified user (by email or username) with accept/decline links.
     Only family administrators can send invitations.
 
-    **Rate Limiting:** 10 invitations per hour per user
+    **Rate Limiting:**
+    10 invitations per hour per user.
 
     **Requirements:**
-    - User must be a family administrator
-    - Family must not have reached member limit
-    - Invitee must exist in the system (by email or username)
-    - Invitee must not already be a family member
+    - User must be a family administrator.
+    - Family must not have reached its member limit.
+    - Invitee must exist in the system.
+    - Invitee must not already be a family member or have a pending invitation.
 
-    **Returns:**
-    - Invitation details including expiration time
+    Args:
+        request (Request): The HTTP request object.
+        family_id (str): The ID of the family.
+        invite_request (InviteMemberRequest): The invitation details (identifier, relationship type).
+        current_user (dict): The authenticated user (must be an admin).
+
+    Returns:
+        InvitationResponse: The created invitation details including expiration time.
+
+    Raises:
+        HTTPException(404): If the family is not found.
+        HTTPException(403): If the user is not an admin or member limit is exceeded.
+        HTTPException(400): If the invitee is invalid, relationship is invalid, or invitation fails.
+        HTTPException(429): If the rate limit is exceeded.
     """
     user_id = str(current_user["_id"])
 
@@ -696,17 +871,30 @@ async def respond_to_invitation(
     """
     Respond to a family invitation (accept or decline).
 
-    Only the invited user can respond to their own invitations.
-    Accepting creates a bidirectional family relationship.
+    Allows a user to accept or decline a pending family invitation.
+    Accepting the invitation creates a bidirectional family relationship and adds the user to the family.
 
-    **Rate Limiting:** 20 responses per hour per user
+    **Rate Limiting:**
+    20 responses per hour per user.
 
     **Requirements:**
-    - User must be the invitation recipient
-    - Invitation must be pending and not expired
+    - User must be the intended recipient of the invitation.
+    - Invitation must be in 'pending' status and not expired.
 
-    **Returns:**
-    - Response status and family information (if accepted)
+    Args:
+        request (Request): The HTTP request object.
+        invitation_id (str): The ID of the invitation to respond to.
+        response_request (RespondToInvitationRequest): The response action ('accept' or 'decline').
+        current_user (dict): The authenticated user.
+
+    Returns:
+        JSONResponse: A success message and the result of the action (e.g., family info if accepted).
+
+    Raises:
+        HTTPException(404): If the invitation is not found or expired.
+        HTTPException(403): If the user is not the recipient.
+        HTTPException(400): If the action is invalid or the operation fails.
+        HTTPException(429): If the rate limit is exceeded.
     """
     user_id = str(current_user["_id"])
 
@@ -750,16 +938,26 @@ async def respond_to_invitation(
 @router.get("/invitation/{invitation_token}/accept")
 async def accept_invitation_by_token(request: Request, invitation_token: str) -> JSONResponse:
     """
-    Accept a family invitation using the email token link.
+    Accept a family invitation using a secure token.
 
-    This endpoint is accessed via email links and doesn't require authentication.
-    The token provides the necessary security and user identification.
+    This endpoint is designed for email links and allows accepting an invitation without
+    requiring a prior login session (though the user must be identified by the token).
+    It validates the token and processes the acceptance.
 
-    **Rate Limiting:** 10 requests per hour per IP
+    **Rate Limiting:**
+    10 requests per hour per IP address.
 
-    **Returns:**
-    - Success message and family information
-    - Redirect information for the user to log in
+    Args:
+        request (Request): The HTTP request object (used for IP-based rate limiting).
+        invitation_token (str): The secure token from the invitation email.
+
+    Returns:
+        JSONResponse: Success message, family info, and a redirect URL to the login page.
+
+    Raises:
+        HTTPException(404): If the token is invalid or expired.
+        HTTPException(400): If the acceptance process fails.
+        HTTPException(429): If the rate limit is exceeded.
     """
     # Apply IP-based rate limiting for unauthenticated endpoint
     await security_manager.check_rate_limit(
@@ -804,15 +1002,25 @@ async def accept_invitation_by_token(request: Request, invitation_token: str) ->
 @router.get("/invitation/{invitation_token}/decline")
 async def decline_invitation_by_token(request: Request, invitation_token: str) -> JSONResponse:
     """
-    Decline a family invitation using the email token link.
+    Decline a family invitation using a secure token.
 
-    This endpoint is accessed via email links and doesn't require authentication.
-    The token provides the necessary security and user identification.
+    This endpoint is designed for email links and allows declining an invitation without
+    requiring a prior login session. It validates the token and processes the decline action.
 
-    **Rate Limiting:** 10 requests per hour per IP
+    **Rate Limiting:**
+    10 requests per hour per IP address.
 
-    **Returns:**
-    - Success message confirming the decline
+    Args:
+        request (Request): The HTTP request object (used for IP-based rate limiting).
+        invitation_token (str): The secure token from the invitation email.
+
+    Returns:
+        JSONResponse: Success message confirming the decline.
+
+    Raises:
+        HTTPException(404): If the token is invalid or expired.
+        HTTPException(400): If the decline process fails.
+        HTTPException(429): If the rate limit is exceeded.
     """
     # Apply IP-based rate limiting for unauthenticated endpoint
     await security_manager.check_rate_limit(
@@ -862,18 +1070,30 @@ async def get_family_invitations(
     """
     Get all invitations for a family.
 
+    Retrieves a list of all invitations sent for a specific family.
     Only family administrators can view invitation details.
-    Non-admin family members will receive an empty list.
-    Optionally filter by status (pending, accepted, declined, expired).
+    Non-admin family members will receive an empty list (graceful degradation).
 
-    **Rate Limiting:** 20 requests per hour per user
+    **Rate Limiting:**
+    20 requests per hour per user.
 
     **Requirements:**
-    - User must be a member of the family
+    - User must be a member of the family.
+    - User must be a family administrator to see results.
 
-    **Returns:**
-    - List of family invitations with details (admins only)
-    - Empty list for non-admin members
+    Args:
+        request (Request): The HTTP request object.
+        family_id (str): The ID of the family.
+        status_filter (str, optional): Filter invitations by status (e.g., 'pending').
+        current_user (dict): The authenticated user.
+
+    Returns:
+        List[InvitationResponse]: A list of family invitations (admins only).
+                                  Returns an empty list for non-admin members.
+
+    Raises:
+        HTTPException(404): If the family is not found.
+        HTTPException(500): If there is an error retrieving invitations.
     """
     user_id = str(current_user["_id"])
 
@@ -984,17 +1204,30 @@ async def resend_invitation(
     """
     Resend a family invitation email.
 
-    Only family administrators can resend invitations.
-    Can only resend pending, non-expired invitations.
+    Allows family administrators to resend an invitation email if the original was lost or expired.
+    Can only resend invitations that are in 'pending' status and have not yet expired.
 
-    **Rate Limiting:** 5 resends per hour per user
+    **Rate Limiting:**
+    5 resends per hour per user.
 
     **Requirements:**
-    - User must be a family administrator
-    - Invitation must be pending and not expired
+    - User must be a family administrator.
+    - Invitation must be pending and not expired.
 
-    **Returns:**
-    - Resend confirmation and status
+    Args:
+        request (Request): The HTTP request object.
+        family_id (str): The ID of the family.
+        invitation_id (str): The ID of the invitation to resend.
+        current_user (dict): The authenticated user (must be an admin).
+
+    Returns:
+        JSONResponse: Confirmation of the resend action and email status.
+
+    Raises:
+        HTTPException(404): If the invitation is not found.
+        HTTPException(403): If the user is not an admin.
+        HTTPException(400): If the resend fails (e.g., invitation not pending).
+        HTTPException(429): If the rate limit is exceeded.
     """
     user_id = str(current_user["_id"])
 
@@ -1042,17 +1275,30 @@ async def cancel_invitation(
     """
     Cancel a pending family invitation.
 
-    Only family administrators can cancel invitations.
-    Can only cancel pending invitations.
+    Allows family administrators to revoke an invitation before it is accepted.
+    Once cancelled, the invitation link becomes invalid.
 
-    **Rate Limiting:** 10 cancellations per hour per user
+    **Rate Limiting:**
+    10 cancellations per hour per user.
 
     **Requirements:**
-    - User must be a family administrator
-    - Invitation must be pending
+    - User must be a family administrator.
+    - Invitation must be in 'pending' status.
 
-    **Returns:**
-    - Cancellation confirmation
+    Args:
+        request (Request): The HTTP request object.
+        family_id (str): The ID of the family.
+        invitation_id (str): The ID of the invitation to cancel.
+        current_user (dict): The authenticated user (must be an admin).
+
+    Returns:
+        JSONResponse: Confirmation of the cancellation.
+
+    Raises:
+        HTTPException(404): If the invitation is not found.
+        HTTPException(403): If the user is not an admin.
+        HTTPException(400): If the cancellation fails.
+        HTTPException(429): If the rate limit is exceeded.
     """
     user_id = str(current_user["_id"])
 
@@ -1097,17 +1343,26 @@ async def cleanup_expired_invitations(
     request: Request, current_user: dict = Depends(enforce_all_lockdowns)
 ) -> JSONResponse:
     """
-    Clean up expired family invitations (admin only).
+    Clean up expired family invitations (Administrative Task).
 
-    This endpoint manually triggers a cleanup process to remove expired family invitations from the system.
-    This is an administrative task that is normally handled by a scheduled background job.
+    Manually triggers the cleanup process to remove expired invitations from the system.
+    This is typically handled by a background job but can be invoked manually by admins.
 
     **Access Control:**
-    - This endpoint is intended for administrative use.
+    Restricted to system administrators or family admins (depending on configuration).
 
-    **Use Cases:**
-    - Manually reclaim storage space by removing expired invitations.
-    - Force a cleanup outside of the regular schedule for maintenance purposes.
+    **Rate Limiting:**
+    2 requests per hour per user.
+
+    Args:
+        request (Request): The HTTP request object.
+        current_user (dict): The authenticated user.
+
+    Returns:
+        JSONResponse: Statistics about the cleanup operation (count of removed invitations).
+
+    Raises:
+        HTTPException(500): If the cleanup process fails.
     """
     user_id = str(current_user["_id"])
 
@@ -1151,19 +1406,34 @@ async def manage_admin_role(
     """
     Promote a member to admin or demote an admin to member.
 
-    Only family administrators can perform admin role changes.
-    Prevents demoting the last administrator to ensure family continuity.
+    Allows managing administrative privileges within the family.
+    Only family administrators can perform these actions.
+    Safeguards prevent demoting the last administrator to ensure the family always has an admin.
 
-    **Rate Limiting:** 5 requests per hour per user
+    **Rate Limiting:**
+    5 requests per hour per user.
 
     **Requirements:**
-    - User must be a family administrator
-    - Target user must be a family member
-    - Cannot demote the last administrator
-    - Cannot promote someone who is already an admin
+    - User must be a family administrator.
+    - Target user must be a family member.
+    - Cannot demote the last administrator.
+    - Cannot promote someone who is already an admin.
 
-    **Returns:**
-    - Admin action confirmation and details
+    Args:
+        request (Request): The HTTP request object.
+        family_id (str): The ID of the family.
+        user_id (str): The ID of the target user.
+        admin_request (AdminActionRequest): The action details ('promote' or 'demote').
+        current_user (dict): The authenticated user (must be an admin).
+
+    Returns:
+        AdminActionResponse: Details of the performed action.
+
+    Raises:
+        HTTPException(404): If the family is not found.
+        HTTPException(403): If the user is not an admin.
+        HTTPException(400): If the action is invalid (e.g., demoting last admin).
+        HTTPException(429): If the rate limit is exceeded.
     """
     admin_user_id = str(current_user["_id"])
 
@@ -1254,18 +1524,32 @@ async def manage_backup_admin(
     """
     Designate or remove a backup administrator.
 
-    Backup administrators can be promoted to full admin status in case
-    of emergency or if all current admins become unavailable.
+    Backup administrators can be promoted to full admin status in case of emergency
+    or if all current admins become unavailable. This ensures business continuity for the family.
 
-    **Rate Limiting:** 5 requests per hour per user
+    **Rate Limiting:**
+    5 requests per hour per user.
 
     **Requirements:**
-    - User must be a family administrator
-    - Target user must be a family member
-    - Target user cannot already be an admin
+    - User must be a family administrator.
+    - Target user must be a family member.
+    - Target user cannot already be a full admin.
 
-    **Returns:**
-    - Backup admin action confirmation and details
+    Args:
+        request (Request): The HTTP request object.
+        family_id (str): The ID of the family.
+        user_id (str): The ID of the target user.
+        backup_request (BackupAdminRequest): The action details ('designate' or 'remove').
+        current_user (dict): The authenticated user (must be an admin).
+
+    Returns:
+        BackupAdminResponse: Details of the backup admin action.
+
+    Raises:
+        HTTPException(404): If the family is not found.
+        HTTPException(403): If the user is not an admin.
+        HTTPException(400): If the action is invalid.
+        HTTPException(429): If the rate limit is exceeded.
     """
     admin_user_id = str(current_user["_id"])
 
@@ -1352,16 +1636,31 @@ async def get_admin_actions_log(
     """
     Get the admin actions log for a family.
 
-    Returns a paginated list of all administrative actions performed
-    in the family, including promotions, demotions, and backup admin changes.
+    Retrieves a paginated list of all administrative actions performed in the family,
+    including promotions, demotions, and backup admin changes.
+    This provides an audit trail for family management.
 
-    **Rate Limiting:** 20 requests per hour per user
+    **Rate Limiting:**
+    20 requests per hour per user.
 
     **Requirements:**
-    - User must be a family administrator
+    - User must be a family administrator.
 
-    **Returns:**
-    - Paginated list of admin actions with details
+    Args:
+        request (Request): The HTTP request object.
+        family_id (str): The ID of the family.
+        limit (int): Number of records to return (default: 50, max: 100).
+        offset (int): Number of records to skip (default: 0).
+        current_user (dict): The authenticated user (must be an admin).
+
+    Returns:
+        AdminActionsLogResponse: A paginated list of admin actions.
+
+    Raises:
+        HTTPException(404): If the family is not found.
+        HTTPException(403): If the user is not an admin.
+        HTTPException(400): If pagination parameters are invalid.
+        HTTPException(429): If the rate limit is exceeded.
     """
     admin_user_id = str(current_user["_id"])
 
@@ -1436,19 +1735,25 @@ async def get_family_limits(
     """
     Get the current user's family limits and usage information.
 
-    Returns comprehensive information about family creation limits, member limits,
-    current usage statistics, and billing integration data.
+    Returns comprehensive information about:
+    - Family creation limits (how many families a user can create).
+    - Member limits (how many members can be in a family).
+    - Current usage statistics against these limits.
+    - Optional billing integration data.
 
-    **Rate Limiting:** 30 requests per hour per user
+    **Rate Limiting:**
+    30 requests per hour per user.
 
-    **Parameters:**
-    - include_billing_metrics: Include detailed billing metrics in response
+    Args:
+        request (Request): The HTTP request object.
+        include_billing_metrics (bool): Whether to include detailed billing metrics.
+        current_user (dict): The authenticated user.
 
-    **Returns:**
-    - Current limits and usage statistics
-    - Detailed limit status and enforcement information
-    - Upgrade requirements and recommendations
-    - Optional billing metrics for usage tracking
+    Returns:
+        FamilyLimitsResponse: Current limits, usage statistics, and enforcement details.
+
+    Raises:
+        HTTPException(500): If there is an error retrieving limits.
     """
     user_id = str(current_user["_id"])
 

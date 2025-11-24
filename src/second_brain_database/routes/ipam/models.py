@@ -1,14 +1,40 @@
 """
-IPAM Enhancement Pydantic Models.
+# IPAM Models
 
-This module contains request and response models for IPAM backend enhancements including:
-- Reservations
-- Shareable links
-- User preferences
-- Notifications
-- Statistics and forecasting
-- Webhooks
-- Bulk operations
+This module defines the **data structures** for the IP Address Management System.
+It covers the full lifecycle of IP resources, from reservation to allocation and monitoring.
+
+## Domain Overview
+
+The IPAM system manages the **10.X.Y.Z** private address space hierarchy:
+- **Country**: Top-level grouping (mapped to X-octet ranges).
+- **Region**: /24 Subnets (defined by X.Y octets).
+- **Host**: Individual IPs (defined by Z octet).
+
+## Key Models
+
+### 1. Core Resources
+- **Reservation**: Temporary hold on an IP/Region (`ReservationCreateRequest`).
+- **Share**: Secure link to share resource details (`ShareCreateRequest`).
+
+### 2. User Preferences
+- **Filters**: Saved search criteria (`SavedFilterRequest`).
+- **Notifications**: Alert rules for capacity/events (`NotificationRuleRequest`).
+
+### 3. Analytics
+- **Forecast**: Capacity prediction models (`ForecastResponse`).
+- **Trends**: Historical usage data (`TrendDataResponse`).
+
+## Usage Example
+
+```python
+reservation = ReservationCreateRequest(
+    resource_type="region",
+    x_octet=10,
+    y_octet=5,
+    reason="New Data Center"
+)
+```
 """
 
 from datetime import datetime

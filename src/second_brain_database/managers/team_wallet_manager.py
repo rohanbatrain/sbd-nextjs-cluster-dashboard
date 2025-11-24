@@ -97,7 +97,49 @@ class TransactionError(TeamWalletError):
 
 class TeamWalletManager:
     """
-    Manages all business logic for team SBD wallet functionality.
+    Manages team SBD wallet operations with permissions, requests, and audit logging.
+
+    Provides comprehensive team wallet management following established codebase
+    patterns for security, multi-tenancy, and dependency injection.
+
+    **Core Features:**
+    - **Wallet initialization**: Virtual account creation for teams
+    - **Token requests**: Member token request workflow with auto-approval
+    - **Spending permissions**: Granular member spending control
+    - **Account freeze**: Emergency account freeze/unfreeze
+    - **Audit logging**: Comprehensive transaction audit trails
+    - **Emergency recovery**: Backup admin emergency unfreeze
+
+    **Wallet Operations:**
+    - Initialize team wallet with virtual account
+    - Get wallet info (balance, permissions, transactions)
+    - Create and review token requests
+    - Update spending permissions per member
+    - Freeze/unfreeze team accounts
+
+    **Token Request Workflow:**
+    - Members create token requests with amount and reason
+    - Auto-approval for amounts below threshold
+    - Admin review for amounts above threshold
+    - Automatic expiry after 7 days
+    - Comprehensive audit logging
+
+    **Spending Permissions:**
+    - Per-member spending limits
+    - Admin unlimited spending by default
+    - Configurable spending limits
+    - Permission change audit logging
+
+    **Emergency Features:**
+    - Backup admin designation
+    - Emergency account unfreeze
+    - Recovery operation audit trails
+
+    **Collections:**
+    - `workspaces`: Team workspace documents with SBD account info
+    - `team_token_requests`: Token request documents
+    - `team_transactions`: Transaction history
+    - `team_audit_log`: Audit trail records
     """
 
     def __init__(self, db_manager_instance: Any = None, sbd_system: Any = None):

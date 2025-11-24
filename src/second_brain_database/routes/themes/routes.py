@@ -1,28 +1,40 @@
-from datetime import datetime, timezone
-import time
-import uuid
+"""
+# Themes Routes
 
-from fastapi import APIRouter, Depends, Request
+This module provides the **REST API endpoints** for the Theme Management System.
+It handles theme rentals, ownership verification, and application-specific filtering.
 
-from second_brain_database.database import db_manager
-from second_brain_database.docs.models import (
-    StandardErrorResponse,
-    StandardSuccessResponse,
-    ValidationErrorResponse,
-    create_error_responses,
-    create_standard_responses,
-)
-from second_brain_database.managers.logging_manager import get_logger
-from second_brain_database.managers.security_manager import security_manager
-from second_brain_database.routes.auth import enforce_all_lockdowns
-from second_brain_database.utils.logging_utils import (
-    ip_address_context,
-    log_database_operation,
-    log_error_with_context,
-    log_performance,
-    request_id_context,
-    user_id_context,
-)
+## Domain Overview
+
+Themes allow users to customize the visual appearance of applications.
+- **Ownership Models**:
+    - **Rented**: Temporary access (e.g., 24 hours) purchased with virtual currency.
+    - **Owned**: Permanent access acquired through purchase or achievements.
+- **Filtering**: Themes are filtered by `User-Agent` to ensure compatibility (e.g., "Emotion Tracker" themes only show in that app).
+
+## Key Features
+
+### 1. Rental Management
+- **Active Rentals**: Lists currently valid rented themes (`/themes/rented`).
+- **Expiration Check**: Automatically filters out expired rentals based on UTC time.
+
+### 2. Ownership Verification
+- **Permanent Collection**: Lists all permanently owned themes (`/themes/owned`).
+- **Source Tracking**: Records how the theme was acquired (purchase, bundle, event).
+
+## API Endpoints
+
+- `GET /themes/rented` - Get active rented themes
+- `GET /themes/owned` - Get permanently owned themes
+
+## Usage Example
+
+```python
+# Get valid rented themes for the current user
+response = await client.get("/themes/rented")
+active_themes = response.json()["themes_rented"]
+```
+"""
 
 router = APIRouter()
 logger = get_logger(prefix="[THEMES]")

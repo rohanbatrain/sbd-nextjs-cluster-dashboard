@@ -36,10 +36,56 @@ logger = get_logger(prefix="[LlamaIndexVectorManager]")
 
 
 class LlamaIndexVectorSearchManager:
-    """Production-ready vector search manager with LlamaIndex and hybrid search.
-    
-    This manager provides seamless migration from direct Qdrant usage to LlamaIndex,
-    enabling hybrid search with both dense and sparse vectors for improved retrieval.
+    """
+    Production-ready vector search manager with LlamaIndex and hybrid search capabilities.
+
+    Provides seamless migration from direct Qdrant usage to LlamaIndex, enabling hybrid
+    search with both dense and sparse vectors for improved retrieval accuracy.
+
+    **Core Features:**
+    - **LlamaIndex integration**: QdrantVectorStore with hybrid search
+    - **Dense vectors**: BGE embeddings for semantic similarity
+    - **Sparse vectors**: Splade embeddings for keyword matching
+    - **Hybrid search**: Configurable dense/sparse weighting (alpha parameter)
+    - **FastEmbed**: Efficient sparse vector generation
+
+    **Hybrid Search:**
+    - **Alpha parameter**: Controls dense/sparse balance
+      - `alpha=1.0`: Dense only (pure semantic)
+      - `alpha=0.0`: Sparse only (pure keyword)
+      - `alpha=0.5`: Balanced hybrid (default)
+    - **Sparse top-k**: Configurable sparse retrieval limit
+    - **Automatic fallback**: Graceful degradation to dense-only
+
+    **Embedding Models:**
+    - **Dense**: HuggingFace embeddings (BGE, MiniLM, etc.)
+    - **Sparse**: FastEmbed Splade models
+    - **Device selection**: CPU/GPU support
+    - **Model caching**: Local cache for faster loading
+
+    **Document Operations:**
+    - Index documents with metadata
+    - Hybrid search with filtering
+    - Delete documents by ID
+    - Batch processing support
+
+    **Collection Management:**
+    - Automatic collection creation
+    - Hybrid mode configuration
+    - Dense + sparse vector storage
+    - Optimized indexing thresholds
+
+    **Search Features:**
+    - Similarity cutoff filtering
+    - Metadata-based filtering
+    - Configurable result limits
+    - Score-based ranking
+
+    **Configuration:**
+    - Hybrid search enable/disable
+    - Alpha parameter tuning
+    - Sparse top-k configuration
+    - Similarity cutoff thresholds
     """
 
     def __init__(self):

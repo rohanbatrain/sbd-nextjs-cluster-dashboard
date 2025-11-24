@@ -1,7 +1,36 @@
 """
-Dashboard preferences models.
+# Dashboard Models
 
-Pydantic models for dashboard widget configuration and user preferences.
+This module defines the **data structures** for the User Dashboard System.
+It handles widget configuration, layout preferences, and positioning.
+
+## Domain Overview
+
+The Dashboard allows users to customize their home view with various widgets.
+- **Contexts**: Dashboards can be `personal`, `family`, or `team`.
+- **Layouts**: Grid-based positioning system (12-column grid).
+- **Widgets**: Configurable components (e.g., "Recent Files", "System Status").
+
+## Key Models
+
+### 1. Widget Config
+- **Purpose**: Defines a single widget instance.
+- **Fields**: `widget_id`, `type`, `position` (x, y, w, h), `settings`.
+
+### 2. Dashboard Layout
+- **Purpose**: Container for a set of widgets in a specific context.
+- **Fields**: `context`, `context_id`, `widgets`, `grid_columns`.
+
+## Usage Example
+
+```python
+position = WidgetPosition(x=0, y=0, w=6, h=4)
+widget = WidgetConfig(
+    widget_id="w_123",
+    widget_type="clock",
+    position=position
+)
+```
 """
 
 from datetime import datetime

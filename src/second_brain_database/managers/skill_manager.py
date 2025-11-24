@@ -65,13 +65,45 @@ class SkillHierarchyError(SkillError):
 
 class SkillManager:
     """
-    Unified manager for skill tracking, logging, and analytics.
+    Unified manager for skill tracking, logging, and analytics with hierarchical organization.
 
-    Follows established patterns from workspace_manager.py:
-    - Dependency injection in __init__
-    - Custom exception hierarchy
-    - Comprehensive logging
-    - Async operations throughout
+    Provides comprehensive skill management following established codebase patterns
+    with dependency injection, custom exceptions, and async operations.
+
+    **Core Features:**
+    - **Skill CRUD**: Create, read, update, delete skills
+    - **Hierarchical organization**: Parent-child skill relationships
+    - **Skill logging**: Track progress, hours, confidence levels
+    - **Analytics**: Comprehensive skill and user-level analytics
+    - **Circular reference detection**: Prevents invalid hierarchies
+
+    **Skill Hierarchy:**
+    - Multiple parent skills supported
+    - Automatic child skill tracking
+    - Tree view generation
+    - Circular reference prevention
+
+    **Skill Logging:**
+    - Progress states (learning, practicing, proficient, expert)
+    - Numeric skill levels
+    - Duration tracking (hours logged)
+    - Confidence levels
+    - Project associations
+    - Contextual metadata
+
+    **Analytics:**
+    - Total logs and current state
+    - Last activity tracking
+    - Project count per skill
+    - Total hours logged
+    - Average confidence scores
+    - Child skill rollup statistics
+
+    **Data Model:**
+    - Embedded logs within skill documents
+    - Soft delete support (`is_active` flag)
+    - Automatic timestamp management
+    - Pagination support for lists
     """
 
     def __init__(self, db_manager: Any = None, logging_manager: Any = None):

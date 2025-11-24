@@ -1,9 +1,44 @@
 """
-Shop items seed data for automated database seeding.
+# Shop Seed Data
 
-This module provides the default shop items (themes, avatars, banners, bundles)
-that are automatically seeded into the database on application startup if the
-shop_items collection is empty.
+This module defines the **initial catalog** of digital assets for the Shop.
+It provides a registry of themes, avatars, banners, and bundles that are automatically
+seeded into the database upon system initialization.
+
+## Domain Overview
+
+The seed data ensures the shop is populated with content out-of-the-box.
+It defines:
+- **Metadata**: Name, description, price, and category for each item.
+- **Bundles**: Logic for grouping multiple items into a single purchasable unit.
+- **Pricing**: Default SBD token costs for all assets.
+
+## Key Features
+
+### 1. Asset Categories
+- **Themes**: UI color schemes (Light/Dark variants).
+- **Avatars**: Static and animated user profile pictures.
+- **Banners**: Profile background images.
+- **Bundles**: Value packs (e.g., "Cat Lovers Pack").
+
+### 2. Seeding Logic
+- **Idempotency**: The seeding process (handled elsewhere) checks for existing items
+  to prevent duplicates.
+- **Hardcoded IDs**: Uses stable string IDs (e.g., `emotion_tracker-theme-dark`)
+  to ensure consistency across deployments.
+
+## Usage
+
+This module is primarily used by the `DatabaseManager` or startup scripts:
+
+```python
+from second_brain_database.routes.shop.shop_data import get_shop_items_seed_data
+
+items = get_shop_items_seed_data()
+for item in items:
+    # Insert into DB if not exists
+    ...
+```
 """
 
 # Bundle contents mapping

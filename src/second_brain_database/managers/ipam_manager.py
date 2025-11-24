@@ -82,7 +82,7 @@ class CapacityExhausted(IPAMError):
 class QuotaExceeded(IPAMError):
     """User quota exceeded."""
 
-    def __init__(self, message: str, quota_type: str = None, limit: int = None, current: int = None):
+    def __init__(selfself, message: str, quota_type: str = None, limit: int = None, current: int = None):
         super().__init__(
             message, "QUOTA_EXCEEDED", {"quota_type": quota_type, "limit": limit, "current": current}
         )
@@ -105,7 +105,7 @@ class CountryNotFound(IPAMError):
 class DuplicateAllocation(IPAMError):
     """Duplicate allocation detected."""
 
-    def __init__(self, message: str, resource_type: str = None, identifier: str = None):
+    def __init__(selfself, message: str, resource_type: str = None, identifier: str = None):
         super().__init__(
             message, "DUPLICATE_ALLOCATION", {"resource_type": resource_type, "identifier": identifier}
         )
@@ -123,14 +123,14 @@ class ValidationError(IPAMError):
 class DatabaseManagerProtocol(Protocol):
     """Protocol for database manager dependency injection."""
 
-    def get_collection(self, collection_name: str) -> Any: ...
-    def get_tenant_collection(self, collection_name: str) -> Any: ...
-    def log_query_start(self, collection: str, operation: str, context: Dict[str, Any]) -> float: ...
+    def get_collection(selfself, collection_name: str) -> Any: ...
+    def get_tenant_collection(selfself, collection_name: str) -> Any: ...
+    def log_query_start(selfself, collection: str, operation: str, context: Dict[str, Any]) -> float: ...
     def log_query_success(
-        self, collection: str, operation: str, start_time: float, count: int, info: str = None
+        selfself, collection: str, operation: str, start_time: float, count: int, info: str = None
     ) -> None: ...
     def log_query_error(
-        self, collection: str, operation: str, start_time: float, error: Exception, context: Dict[str, Any]
+        selfself, collection: str, operation: str, start_time: float, error: Exception, context: Dict[str, Any]
     ) -> None: ...
 
 
@@ -138,24 +138,51 @@ class DatabaseManagerProtocol(Protocol):
 class RedisManagerProtocol(Protocol):
     """Protocol for Redis manager dependency injection."""
 
-    async def get_redis(self) -> Any: ...
-    async def set_with_expiry(self, key: str, value: Any, expiry: int) -> None: ...
-    async def get(self, key: str) -> Any: ...
-    async def delete(self, key: str) -> None: ...
+    async def get_redis(selfself) -> Any: ...
+    async def set_with_expiry(selfself, key: str, value: Any, expiry: int) -> None: ...
+    async def get(selfself, key: str) -> Any: ...
+    async def delete(selfself, key: str) -> None: ...
 
 
 class IPAMManager:
     """
-    Enterprise-grade IPAM management system with dependency injection and transaction safety.
+    Enterprise-grade IP Address Management (IPAM) system with hierarchical allocation.
 
-    This manager implements comprehensive IP allocation management with:
-    - Dependency injection for testability and modularity
-    - Transaction safety using MongoDB sessions for critical operations
-    - Comprehensive error handling with detailed context
-    - Auto-allocation algorithms for optimal address space utilization
-    - User isolation with independent namespaces
-    - Redis caching for performance optimization
-    - Comprehensive audit logging and performance metrics
+    Manages IP address allocations in a hierarchical structure (Global Root → Country → Region → Host)
+    with automatic allocation algorithms, user isolation, and comprehensive audit capabilities.
+
+    **Architecture:**
+    - **Global Root**: Fixed at `10.0.0.0/8`
+    - **Country Level**: X octet (0-255) mapped to countries
+    - **Region Level**: Y octet (0-255) auto-allocated per user
+    - **Host Level**: Z octet (1-254) auto-allocated per region
+
+    **Enterprise Features:**
+    - **Dependency injection**: Testable and modular design
+    - **Transaction safety**: MongoDB sessions for critical operations
+    - **Auto-allocation**: Intelligent X.Y and Z octet allocation
+    - **User isolation**: Independent namespaces per user
+    - **Redis caching**: Performance optimization (24h country, 60s quota)
+    - **Quota management**: Configurable limits with enforcement
+    - **Concurrency control**: Retry logic for race conditions
+
+    **Allocation Algorithms:**
+    - `find_next_xy()`: Finds next available X.Y within country range
+    - `find_next_z()`: Finds next available Z within region (1-254)
+    - Capacity warnings at 80% utilization
+    - Automatic cache invalidation on allocation
+
+    **Quota System:**
+    - Default region quota: 1,000 per user
+    - Default host quota: 10,000 per user
+    - Warning threshold: 80% of quota
+    - Atomic quota counter updates
+
+    **Collections:**
+    - `continent_country_mapping`: Country to X octet mapping
+    - `ipam_regions`: Region allocations (X.Y per user)
+    - `ipam_hosts`: Host allocations (X.Y.Z per user)
+    - `ipam_user_quotas`: User quota tracking
     """
 
     def __init__(

@@ -68,7 +68,40 @@ class OwnerCannotBeRemoved(WorkspaceError):
 
 class WorkspaceManager:
     """
-    Manages all business logic for the Teams/Workspaces feature.
+    Manages team workspaces with member management and role-based access control.
+
+    Provides comprehensive workspace (team) management following established codebase
+    patterns for multi-tenancy, security, and dependency injection.
+
+    **Core Features:**
+    - **Workspace CRUD**: Create, read, update, delete workspaces
+    - **Member management**: Add, remove, update member roles
+    - **RBAC**: Role-based access control (owner, admin, member)
+    - **Multi-tenancy**: Automatic tenant isolation
+    - **Owner protection**: Owner cannot be removed or demoted
+
+    **Roles:**
+    - **Owner**: Creator of workspace, full control, cannot be removed
+    - **Admin**: Can manage members and workspace settings
+    - **Member**: Basic workspace access
+
+    **Security:**
+    - Automatic tenant filtering via `get_tenant_collection()`
+    - Permission checks before all operations
+    - Owner-only workspace deletion
+    - Admin-only member management
+
+    **Member Operations:**
+    - Add members with specified roles
+    - Remove members (except owner)
+    - Update member roles (except owner)
+    - List all workspaces for a user
+
+    **Workspace Operations:**
+    - Create workspace (user becomes owner)
+    - Update workspace details (name, description, settings)
+    - Delete workspace (owner only)
+    - Get workspace by ID (member access required)
     """
 
     def __init__(self, db_manager_instance: Any = None):

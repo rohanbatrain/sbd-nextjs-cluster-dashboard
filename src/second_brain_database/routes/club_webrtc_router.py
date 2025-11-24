@@ -1,8 +1,63 @@
 """
-Club WebRTC Router
+# Club WebRTC Routes
 
-FastAPI router providing WebRTC signaling endpoint and REST API
-for club event rooms with membership validation and role-based permissions.
+This module provides the **WebSocket signaling endpoints** for real-time club events.
+It enables audio/video communication, chat, and collaboration within club rooms.
+
+## Domain Overview
+
+Club Events often require real-time interaction. This module powers:
+- **Virtual Meetings**: Voice and video calls for club gatherings.
+- **Live Events**: Webinars or workshops with presenters and audience.
+- **Collaboration**: Real-time chat and file sharing during events.
+
+## Key Features
+
+### 1. Signaling & Connection
+- **WebSocket Endpoint**: `/clubs/webrtc/events/{club_id}/{event_id}`
+- **Room Management**: Dynamic room creation based on Club+Event IDs.
+- **State Synchronization**: Syncs participants, presence, and chat history.
+
+### 2. Security & Access Control
+- **Membership Check**: Only club members can join event rooms.
+- **Role Validation**: Admins/Leads have special privileges (e.g., mute others).
+- **Token Auth**: JWT-based authentication for WebSocket connections.
+
+### 3. Real-Time Features
+- **Presence**: Tracks who is currently in the room.
+- **Chat**: Persistent chat history for the event.
+- **Reconnection**: Handles temporary network drops gracefully.
+
+## API Endpoints
+
+### WebSocket
+- `WS /clubs/webrtc/events/{club_id}/{event_id}` - Main signaling channel
+
+### REST Management
+- `POST .../create-room` - Initialize a room (Admin only)
+- `GET .../participants` - List current active users
+
+## Usage Examples
+
+### Connecting to an Event Room (Client-Side)
+
+```javascript
+const ws = new WebSocket(
+    `wss://api.example.com/clubs/webrtc/events/${clubId}/${eventId}?token=${jwt}`
+);
+
+ws.onmessage = (msg) => {
+    const data = JSON.parse(msg.data);
+    if (data.type === 'ROOM_STATE') {
+        updateUI(data.payload.participants);
+    }
+};
+```
+
+## Module Attributes
+
+Attributes:
+    router (APIRouter): FastAPI router with `/clubs/webrtc` prefix
 """
 
 import asyncio

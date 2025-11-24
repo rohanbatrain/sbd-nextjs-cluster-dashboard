@@ -1,8 +1,68 @@
 """
-Pydantic models for the blog system.
+# Blog Platform Models
 
-This module contains all request/response models, validation schemas,
-and data transfer objects for the blog functionality.
+This module defines the **Content Management System (CMS)** data structures for the blog platform.
+It handles the entire lifecycle of blog content, from drafting and versioning to publishing and analytics.
+The models support rich text (MDX), SEO optimization, and granular access control.
+
+## Domain Model Overview
+
+The blog system is composed of the following core entities:
+
+- **Website**: A distinct blog instance with its own settings, theme, and domain configuration.
+- **Post**: The primary content unit, supporting Markdown/MDX, categories, and tags.
+- **Comment**: User interactions with posts, featuring moderation workflows and nesting.
+- **Category**: Hierarchical organization structure for posts.
+- **Analytics**: Detailed tracking of views, engagement, and traffic sources.
+
+## Key Features
+
+### 1. Content Safety & Validation
+- **HTML Sanitization**: All content inputs are sanitized using `bleach` to prevent XSS attacks while allowing safe HTML tags.
+- **Slug Normalization**: URLs are automatically validated to ensure they are URL-safe and SEO-friendly.
+
+### 2. Publishing Workflow
+- **Status Lifecycle**: `draft` → `scheduled` → `published` (or `archived`).
+- **Versioning**: Full revision history tracking for posts (`BlogVersion`).
+- **Auto-Save**: Temporary draft storage to prevent data loss.
+
+### 3. SEO & Metadata
+- **Meta Tags**: Dedicated fields for `seo_title`, `seo_description`, and `seo_keywords`.
+- **Social Previews**: Support for Open Graph images and descriptions.
+
+## Usage Examples
+
+### Creating a Blog Post
+
+```python
+try:
+    post = CreateBlogPostRequest(
+        title="My First Post",
+        content="# Hello World\n\nThis is my first post.",
+        categories=["tech", "python"],
+        status="published"
+    )
+    # Content is automatically sanitized
+except ValidationError as e:
+    print(f"Validation error: {e}")
+```
+
+### Moderating Comments
+
+```python
+# Approve a pending comment
+moderation = ModerateCommentRequest(
+    action="approve",
+    reason="Verified user"
+)
+```
+
+## Module Attributes
+
+Attributes:
+    BLOG_POST_STATUSES (List[str]): Valid lifecycle states for a post.
+    COMMENT_STATUSES (List[str]): Valid moderation states for a comment.
+    WEBSITE_ROLES (List[str]): Access levels for website members.
 """
 
 from datetime import datetime
@@ -18,6 +78,14 @@ WEBSITE_ROLES = ["owner", "admin", "editor", "author", "viewer"]
 
 # Enums
 class BlogPostStatus(str, Enum):
+    """Enumeration of blog post lifecycle states.
+
+    Attributes:
+        DRAFT: Post is being written, not publicly visible.
+        PUBLISHED: Post is live and accessible.
+        SCHEDULED: Post is queued for future publication.
+        ARCHIVED: Post is no longer active but preserved.
+    """
     DRAFT = "draft"
     PUBLISHED = "published"
     SCHEDULED = "scheduled"
@@ -25,6 +93,14 @@ class BlogPostStatus(str, Enum):
 
 
 class CommentStatus(str, Enum):
+    """Enumeration of comment moderation states.
+
+    Attributes:
+        PENDING: Comment awaiting moderator review.
+        APPROVED: Comment is publicly visible.
+        REJECTED: Comment was rejected by moderator.
+        SPAM: Comment flagged as spam.
+    """
     PENDING = "pending"
     APPROVED = "approved"
     REJECTED = "rejected"
@@ -33,6 +109,15 @@ class CommentStatus(str, Enum):
 
 
 class WebsiteRole(str, Enum):
+    """Enumeration of website team member roles.
+
+    Attributes:
+        OWNER: Full control, can delete website.
+        ADMIN: Can manage all content and members.
+        EDITOR: Can edit all posts.
+        AUTHOR: Can create and edit own posts.
+        VIEWER: Read-only access.
+    """
     OWNER = "owner"
     ADMIN = "admin"
     EDITOR = "editor"
@@ -41,21 +126,44 @@ class WebsiteRole(str, Enum):
 
 
 class BlogVersion(BaseModel):
-    """Model for a blog post version."""
-    version_id: str
-    post_id: str
-    title: str
-    content: str
-    excerpt: Optional[str]
-    created_at: datetime
-    created_by: str
-    change_summary: Optional[str]
+    """Model representing a snapshot of a blog post at a point in time.
+
+    Used for version history and rollback functionality.
+
+    Attributes:
+        version_id (str): Unique identifier for this version.
+        post_id (str): ID of the post this version belongs to.
+        title (str): Post title at this version.
+        content (str): Post content at this version.
+        excerpt (Optional[str]): Post excerpt at this version.
+        created_at (datetime): When this version was created.
+        created_by (str): User ID who created this version.
+        change_summary (Optional[str]): Brief description of changes made.
+    """
+    version_id: str = Field(..., description="Unique version ID")
+    post_id: str = Field(..., description="Related post ID")
+    title: str = Field(..., description="Post title")
+    content: str = Field(..., description="Post content")
+    excerpt: Optional[str] = Field(None, description="Post excerpt")
+    created_at: datetime = Field(..., description="Creation timestamp")
+    created_by: str = Field(..., description="Creator user ID")
+    change_summary: Optional[str] = Field(None, description="Change description")
 
 
 
 # Request Models
 class CreateBlogWebsiteRequest(BaseModel):
-    """Request model for creating a new blog website."""
+    """
+    Request model for creating a new blog website.
+
+    This model defines the initial configuration for a tenant's blog site.
+    It enforces strict validation on the URL slug to ensure compatibility with
+    routing and DNS standards.
+
+    **Validation:**
+    *   **slug**: Must be alphanumeric (plus hyphens/underscores), lowercase, and cannot start/end with separators.
+    *   **name**: Required, 1-100 characters.
+    """
 
     name: str = Field(..., min_length=1, max_length=100, description="Website name")
     slug: str = Field(..., min_length=1, max_length=50, description="Unique website slug for URLs")
@@ -73,7 +181,17 @@ class CreateBlogWebsiteRequest(BaseModel):
 
 
 class UpdateBlogWebsiteRequest(BaseModel):
-    """Request model for updating a blog website."""
+    """
+    Request model for updating an existing blog website's configuration.
+
+    Allows partial updates to website settings, including visibility, comment policies,
+    and SEO metadata. All fields are optional; only provided fields will be updated.
+
+    **Settings:**
+    *   **is_active**: Master switch to enable/disable the site.
+    *   **is_public**: Controls visibility to unauthenticated users.
+    *   **allow_comments**: Global toggle for the commenting system.
+    """
 
     name: Optional[str] = Field(None, min_length=1, max_length=100, description="Website name")
     description: Optional[str] = Field(None, max_length=500, description="Website description")
@@ -88,7 +206,22 @@ class UpdateBlogWebsiteRequest(BaseModel):
 
 
 class CreateBlogPostRequest(BaseModel):
-    """Request model for creating a new blog post."""
+    """
+    Request model for creating a new blog post.
+
+    Handles the creation of content with rich text (MDX), metadata, and SEO settings.
+    Includes strict sanitization for HTML content to prevent XSS attacks while allowing
+    safe formatting tags.
+
+    **Sanitization:**
+    *   **title**: All HTML tags are stripped.
+    *   **content**: Only a specific allowlist of safe HTML tags (e.g., `<p>`, `<b>`, `<code>`)
+        is permitted. Malicious scripts or iframes are removed.
+
+    **Fields:**
+    *   **content**: Supports MDX (Markdown + Components).
+    *   **status**: Defaults to `DRAFT`.
+    """
 
     title: str = Field(..., min_length=1, max_length=200, description="Post title")
     content: str = Field(..., min_length=10, description="Post content (MDX)")
@@ -124,7 +257,12 @@ class CreateBlogPostRequest(BaseModel):
 
 
 class UpdateBlogPostRequest(BaseModel):
-    """Request model for updating a blog post."""
+    """
+    Request model for updating an existing blog post.
+
+    Supports partial updates to any post field.
+    Note that updating `content` will trigger a new version snapshot in the revision history.
+    """
 
     title: Optional[str] = Field(None, min_length=1, max_length=200, description="Post title")
     content: Optional[str] = Field(None, min_length=10, description="Post content (MDX)")
@@ -143,7 +281,16 @@ class UpdateBlogPostRequest(BaseModel):
 
 
 class CreateBlogCategoryRequest(BaseModel):
-    """Request model for creating a blog category."""
+    """
+    Request model for creating a new blog category.
+
+    Categories provide a hierarchical structure for organizing posts.
+    They support nesting via `parent_id` to create subcategories.
+
+    **Validation:**
+    *   **slug**: Must be URL-safe (alphanumeric + hyphens).
+    *   **name**: Required, 1-50 characters.
+    """
 
     name: str = Field(..., min_length=1, max_length=50, description="Category name")
     slug: str = Field(..., min_length=1, max_length=50, description="Category slug")
@@ -162,7 +309,11 @@ class CreateBlogCategoryRequest(BaseModel):
 
 
 class UpdateBlogCategoryRequest(BaseModel):
-    """Request model for updating a blog category."""
+    """
+    Request model for updating an existing blog category.
+
+    Allows renaming, description updates, or moving the category to a new parent.
+    """
 
     name: Optional[str] = Field(None, min_length=1, max_length=50, description="Category name")
     description: Optional[str] = Field(None, max_length=200, description="Category description")
@@ -170,7 +321,19 @@ class UpdateBlogCategoryRequest(BaseModel):
 
 
 class CreateBlogCommentRequest(BaseModel):
-    """Request model for creating a blog comment."""
+    """
+    Request model for posting a new comment.
+
+    Supports both authenticated users and guest comments (if enabled).
+    Includes HTML sanitization to prevent XSS in comment content.
+
+    **Guest Comments:**
+    *   If the user is not logged in, `author_name` and `author_email` are required.
+    *   Authenticated users will have these fields automatically populated from their profile.
+
+    **Sanitization:**
+    *   **content**: Limited to basic formatting tags (`<b>`, `<i>`, `<a>`, etc.).
+    """
 
     content: str = Field(..., min_length=1, max_length=2000, description="Comment content")
     parent_id: Optional[str] = Field(None, description="Parent comment ID for nested comments")
@@ -187,7 +350,12 @@ class CreateBlogCommentRequest(BaseModel):
 
 
 class UpdateBlogCommentRequest(BaseModel):
-    """Request model for updating a blog comment."""
+    """
+    Request model for editing an existing comment.
+
+    Only the content can be modified. The author and parent cannot be changed.
+    Subject to the same HTML sanitization rules as creation.
+    """
 
     content: str = Field(..., min_length=1, max_length=2000, description="Comment content")
 
@@ -201,26 +369,50 @@ class UpdateBlogCommentRequest(BaseModel):
 
 
 class InviteWebsiteMemberRequest(BaseModel):
-    """Request model for inviting a website member."""
+    """
+    Request model for inviting a new member to a blog website.
+
+    Invitations allow owners to add collaborators (editors, authors) to their site.
+    The invited user will receive an email notification.
+
+    **Roles:**
+    *   **VIEWER**: Default safe role.
+    *   **AUTHOR/EDITOR**: Higher privileges for content creation.
+    """
 
     email: EmailStr = Field(..., description="Email address of the user to invite")
     role: WebsiteRole = Field(WebsiteRole.VIEWER, description="Role to assign to the member")
 
 
 class UpdateWebsiteMemberRequest(BaseModel):
-    """Request model for updating a website member."""
+    """
+    Request model for modifying an existing member's role.
+
+    Used by admins/owners to promote or demote team members.
+    """
 
     role: WebsiteRole = Field(..., description="New role for the member")
 
 
 class PublishBlogPostRequest(BaseModel):
-    """Request model for publishing a blog post."""
+    """
+    Request model for publishing a draft post.
+
+    Can trigger immediate publication or schedule it for a future date.
+    """
 
     scheduled_publish_at: Optional[datetime] = Field(None, description="Optional scheduled publish time")
 
 
 class ModerateCommentRequest(BaseModel):
-    """Request model for moderating a comment."""
+    """
+    Request model for moderating a user comment.
+
+    **Actions:**
+    *   **approve**: Make the comment visible to the public.
+    *   **reject**: Hide the comment (soft delete).
+    *   **spam**: Mark as spam and train the spam filter.
+    """
 
     action: str = Field(..., description="Action to take: 'approve', 'reject', or 'spam'")
     reason: Optional[str] = Field(None, max_length=500, description="Reason for moderation action")
@@ -235,27 +427,49 @@ class ModerateCommentRequest(BaseModel):
 
 
 class AutoSavePostRequest(BaseModel):
-    """Request model for auto-saving a post draft."""
+    """
+    Request model for background auto-saving of post drafts.
+
+    This endpoint is called periodically by the frontend editor to prevent data loss.
+    Auto-saves do **not** create new entries in the revision history to avoid clutter.
+    """
 
     content: str = Field(..., min_length=1, description="Post content to auto-save")
     title: Optional[str] = Field(None, description="Post title")
 
 
 class RestoreVersionRequest(BaseModel):
-    """Request model for restoring a post version."""
+    """
+    Request model for reverting a post to a previous version.
+
+    This action creates a *new* version that is a copy of the selected past version,
+    preserving linear history.
+    """
 
     version_id: str = Field(..., description="Version ID to restore")
 
 
 class NewsletterSubscribeRequest(BaseModel):
-    """Request model for newsletter subscription."""
+    """
+    Request model for public newsletter subscription.
+
+    Used by the public-facing blog pages to collect subscriber emails.
+    """
 
     email: EmailStr = Field(..., description="Email address for newsletter")
     name: Optional[str] = Field(None, max_length=100, description="Subscriber name")
 
 
 class TrackAnalyticsRequest(BaseModel):
-    """Request model for tracking analytics events."""
+    """
+    Request model for tracking user engagement events.
+
+    **Event Types:**
+    *   **view**: Page load or post view.
+    *   **like**: User liked a post/comment.
+    *   **share**: User clicked a share button.
+    *   **bookmark**: User saved the post.
+    """
 
     event_type: str = Field(..., description="Type of event: 'view', 'like', 'share', 'bookmark'")
     post_id: Optional[str] = Field(None, description="Post ID if applicable")
@@ -273,7 +487,16 @@ class TrackAnalyticsRequest(BaseModel):
 
 # Response Models
 class BlogWebsiteResponse(BaseModel):
-    """Response model for blog website information."""
+    """
+    Response model for blog website details.
+
+    Returns the public configuration and statistics of a blog site.
+    Includes computed fields like `post_count` and `total_views`.
+
+    **Context:**
+    *   **user_role**: If the requester is authenticated, this field indicates their
+        permission level on this site (e.g., 'owner', 'viewer').
+    """
 
     website_id: str
     name: str
@@ -298,7 +521,16 @@ class BlogWebsiteResponse(BaseModel):
 
 
 class BlogPostResponse(BaseModel):
-    """Response model for blog post information."""
+    """
+    Response model for a single blog post.
+
+    Contains the full content and metadata of a post.
+    The `content` field returns the processed MDX ready for rendering.
+
+    **Performance:**
+    *   **versions**: By default, this list is empty to reduce payload size.
+        It is only populated if specifically requested via query parameters.
+    """
 
     post_id: str
     website_id: str
@@ -329,7 +561,11 @@ class BlogPostResponse(BaseModel):
 
 
 class BlogCategoryResponse(BaseModel):
-    """Response model for blog category information."""
+    """
+    Response model for a blog category.
+
+    Includes the category hierarchy info (`parent_id`) and usage statistics (`post_count`).
+    """
 
     category_id: str
     website_id: str
@@ -343,7 +579,14 @@ class BlogCategoryResponse(BaseModel):
 
 
 class BlogCommentResponse(BaseModel):
-    """Response model for blog comment information."""
+    """
+    Response model for a blog comment.
+
+    Supports nested threading via the `replies` field.
+
+    **Privacy:**
+    *   **author_email**: Only visible to admins/moderators. Masked or omitted for public users.
+    """
 
     comment_id: str
     website_id: str
@@ -362,7 +605,11 @@ class BlogCommentResponse(BaseModel):
 
 
 class WebsiteMemberResponse(BaseModel):
-    """Response model for website member information."""
+    """
+    Response model for a website team member.
+
+    Combines user profile info with their site-specific role.
+    """
 
     user_id: str
     username: str
@@ -373,7 +620,11 @@ class WebsiteMemberResponse(BaseModel):
 
 
 class BlogAnalyticsResponse(BaseModel):
-    """Response model for blog analytics."""
+    """
+    Response model for aggregated blog analytics.
+
+    Provides high-level metrics for dashboard visualization.
+    """
 
     total_posts: int
     total_views: int
@@ -387,7 +638,11 @@ class BlogAnalyticsResponse(BaseModel):
 
 
 class BlogSearchResponse(BaseModel):
-    """Response model for blog search results."""
+    """
+    Response model for full-text search results.
+
+    Returns matching posts and categories with pagination metadata.
+    """
 
     query: str
     total_results: int
@@ -397,7 +652,11 @@ class BlogSearchResponse(BaseModel):
 
 
 class BlogFeedResponse(BaseModel):
-    """Response model for blog RSS/Atom feeds."""
+    """
+    Response model for RSS/Atom feed generation.
+
+    Used by the feed generator to render XML output.
+    """
 
     title: str
     description: str
@@ -408,7 +667,9 @@ class BlogFeedResponse(BaseModel):
 
 
 class NewsletterSubscriberResponse(BaseModel):
-    """Response model for newsletter subscriber."""
+    """
+    Response model for newsletter subscriber details.
+    """
 
     subscriber_id: str
     website_id: str
@@ -419,7 +680,11 @@ class NewsletterSubscriberResponse(BaseModel):
 
 
 class EngagementMetricsResponse(BaseModel):
-    """Response model for reader engagement metrics."""
+    """
+    Response model for detailed post engagement metrics.
+
+    Used for deep-dive analytics on individual posts.
+    """
 
     post_id: str
     views: int
@@ -434,7 +699,11 @@ class EngagementMetricsResponse(BaseModel):
 
 # Pagination Models
 class PaginationMeta(BaseModel):
-    """Pagination metadata."""
+    """
+    Standard pagination metadata.
+
+    Included in all paginated list responses to support frontend navigation.
+    """
 
     page: int
     limit: int
@@ -445,7 +714,9 @@ class PaginationMeta(BaseModel):
 
 
 class PaginatedBlogPostsResponse(BaseModel):
-    """Paginated response for blog posts."""
+    """
+    Paginated list of blog posts.
+    """
 
     posts: List[BlogPostResponse]
     pagination: PaginationMeta
@@ -453,14 +724,18 @@ class PaginatedBlogPostsResponse(BaseModel):
 
 
 class PaginatedBlogCommentsResponse(BaseModel):
-    """Paginated response for blog comments."""
+    """
+    Paginated list of blog comments.
+    """
 
     comments: List[BlogCommentResponse]
     pagination: PaginationMeta
 
 
 class PaginatedWebsitesResponse(BaseModel):
-    """Paginated response for websites."""
+    """
+    Paginated list of blog websites.
+    """
 
     websites: List[BlogWebsiteResponse]
     pagination: PaginationMeta
@@ -468,7 +743,11 @@ class PaginatedWebsitesResponse(BaseModel):
 
 # Database Schema Models (for internal use)
 class BlogWebsiteDocument(BaseModel):
-    """Database document model for blog_websites collection."""
+    """
+    MongoDB document model for the `blog_websites` collection.
+
+    Represents the persistent state of a blog website.
+    """
 
     website_id: str
     name: str
@@ -517,7 +796,11 @@ class BlogWebsiteDocument(BaseModel):
 
 
 class BlogPostDocument(BaseModel):
-    """Database document model for blog_posts collection."""
+    """
+    MongoDB document model for the `blog_posts` collection.
+
+    Stores the full post content, metadata, and revision history.
+    """
 
     post_id: str
     website_id: str
@@ -581,7 +864,9 @@ class BlogPostDocument(BaseModel):
 
 
 class BlogCategoryDocument(BaseModel):
-    """Database document model for blog_categories collection."""
+    """
+    MongoDB document model for the `blog_categories` collection.
+    """
 
     category_id: str
     website_id: str
@@ -610,7 +895,9 @@ class BlogCategoryDocument(BaseModel):
 
 
 class BlogCommentDocument(BaseModel):
-    """Database document model for blog_comments collection."""
+    """
+    MongoDB document model for the `blog_comments` collection.
+    """
 
     comment_id: str
     website_id: str
@@ -655,7 +942,9 @@ class BlogCommentDocument(BaseModel):
 
 
 class BlogWebsiteMemberDocument(BaseModel):
-    """Database document model for blog_website_members collection."""
+    """
+    MongoDB document model for the `blog_website_members` collection.
+    """
 
     member_id: str
     website_id: str
@@ -682,7 +971,9 @@ class BlogWebsiteMemberDocument(BaseModel):
 
 
 class BlogAnalyticsDocument(BaseModel):
-    """Database document model for blog_analytics collection."""
+    """
+    MongoDB document model for the `blog_analytics` collection.
+    """
 
     analytics_id: str
     website_id: str
@@ -700,7 +991,9 @@ class BlogAnalyticsDocument(BaseModel):
 
 
 class NewsletterSubscriberDocument(BaseModel):
-    """Database document model for blog_newsletter_subscribers collection."""
+    """
+    MongoDB document model for the `blog_newsletter_subscribers` collection.
+    """
 
     subscriber_id: str
     website_id: str
@@ -732,7 +1025,11 @@ class NewsletterSubscriberDocument(BaseModel):
 
 # Error Response Models
 class BlogErrorResponse(BaseModel):
-    """Error response model for blog operations."""
+    """
+    Standard error response model for blog API failures.
+
+    Returns structured error details to help clients handle exceptions gracefully.
+    """
 
     error: Dict[str, Any]
 
@@ -750,7 +1047,11 @@ class BlogErrorResponse(BaseModel):
 
 
 class BlogValidationErrorResponse(BaseModel):
-    """Validation error response model for blog operations."""
+    """
+    Standard validation error response (422 Unprocessable Entity).
+
+    Returns a list of field-specific validation failures.
+    """
 
     detail: List[Dict[str, Any]]
 

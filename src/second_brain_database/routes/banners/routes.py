@@ -1,28 +1,59 @@
-from datetime import datetime, timezone
-import time
-import uuid
+"""
+# Banner Routes
 
-from fastapi import APIRouter, Depends, Request
+This module provides the **REST API endpoints** for the Banner Management System.
+It handles banner rentals, ownership verification, and application-specific settings.
+
+## Domain Overview
+
+Banners are profile header images for users.
+- **Ownership Models**:
+    - **Rented**: Temporary access (e.g., 24 hours) purchased with virtual currency.
+    - **Owned**: Permanent access acquired through purchase or achievements.
+- **Context**: Users can set different banners for different applications.
+
+## Key Features
+
+### 1. Rental Management
+- **Active Rentals**: Lists currently valid rented banners (`/banners/rented`).
+- **Expiration Check**: Automatically filters out expired rentals.
+
+### 2. Ownership Verification
+- **Permanent Collection**: Lists all permanently owned banners (`/banners/owned`).
+- **Source Tracking**: Records origin of ownership (purchase, bundle, etc.).
+
+### 3. Application Context
+- **Current Banner**: Set/Get the active banner for the specific app (`User-Agent` based).
+
+## API Endpoints
+
+- `GET /banners/rented` - Get active rented banners
+- `GET /banners/owned` - Get permanently owned banners
+- `POST /banners/current` - Set active banner for current app
+- `GET /banners/current` - Get active banner for current app
+
+## Usage Example
+
+```python
+# Set banner for the current app
+await client.post("/banners/current", json={
+    "banner_id": "space_banner_01"
+})
+```
+"""
+
+import uuid
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel
 
 from second_brain_database.database import db_manager
-from second_brain_database.docs.models import (
-    StandardErrorResponse,
-    StandardSuccessResponse,
-    ValidationErrorResponse,
-    create_error_responses,
-    create_standard_responses,
-)
+from second_brain_database.docs.models import StandardErrorResponse
 from second_brain_database.managers.logging_manager import get_logger
 from second_brain_database.managers.security_manager import security_manager
-from second_brain_database.routes.auth import enforce_all_lockdowns
-from second_brain_database.utils.logging_utils import (
-    ip_address_context,
-    log_database_operation,
-    log_error_with_context,
-    log_performance,
-    request_id_context,
-    user_id_context,
-)
+from second_brain_database.routes.auth.dependencies import enforce_all_lockdowns
 
 router = APIRouter()
 logger = get_logger(prefix="[BANNERS]")

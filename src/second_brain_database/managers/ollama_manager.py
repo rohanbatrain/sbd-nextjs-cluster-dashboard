@@ -25,19 +25,41 @@ logger = get_logger(prefix="[OllamaManager]")
 
 
 class OllamaManager:
-    """Manager for Ollama LLM operations.
+    """
+    Manages interactions with Ollama local LLM models for AI-powered features.
 
-    This manager handles all interactions with Ollama models including
-    text generation, chat, and embeddings with proper error handling,
-    caching, and logging.
+    Provides a unified interface for text generation, chat conversations, and embeddings
+    with automatic caching, streaming support, and comprehensive error handling.
 
-    Attributes:
-        base_url: Ollama API base URL
-        default_model: Default model to use
-        chat_model: Model for chat operations
-        embedding_model: Model for embeddings
-        timeout: Request timeout in seconds
-        cache_ttl: Cache TTL in seconds
+    **Supported Operations:**
+    - **Text generation**: Prompt-based completion with system prompts
+    - **Chat**: Multi-turn conversations with context management
+    - **Embeddings**: Vector representations for semantic search
+    - **Streaming**: Real-time token-by-token generation
+
+    **Features:**
+    - **Model flexibility**: Support for multiple models with fallback
+    - **Redis caching**: Automatic response caching with configurable TTL
+    - **Streaming**: Async generators for real-time responses
+    - **Temperature control**: Configurable randomness (0.0-1.0)
+    - **Token limits**: Max token configuration per request
+    - **Health monitoring**: Service availability checks
+
+    **Configuration:**
+    - `OLLAMA_HOST`: Ollama API endpoint
+    - `OLLAMA_MODEL`: Default model for generation
+    - `OLLAMA_CHAT_MODEL`: Model for chat operations
+    - `OLLAMA_EMBEDDING_MODEL`: Model for embeddings
+    - `OLLAMA_TIMEOUT`: Request timeout in seconds
+    - `OLLAMA_CACHE_TTL`: Cache expiration time
+
+    **Attributes:**
+        base_url: Ollama API base URL.
+        default_model: Default model for text generation.
+        chat_model: Model for chat operations.
+        embedding_model: Model for embeddings.
+        timeout: Request timeout in seconds.
+        cache_ttl: Cache TTL in seconds.
     """
 
     def __init__(self):

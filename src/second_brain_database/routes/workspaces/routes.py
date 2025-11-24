@@ -1,11 +1,50 @@
 """
-API routes for the Teams/Workspaces feature.
+# Workspace Routes
 
-This module provides REST API endpoints for workspace management including:
-- Workspace creation and management
-- Member management and role assignments (RBAC)
+This module provides the **REST API endpoints** for Workspace (Team) Management.
+It handles team creation, member roles, and the integrated Team Wallet system.
 
-All endpoints require authentication and follow established security patterns.
+## Domain Overview
+
+Workspaces are collaborative environments where teams share resources.
+- **Roles**: `admin` (full control), `editor` (content access), `viewer` (read-only).
+- **Wallet**: Each workspace has a shared SBD token wallet for collective spending.
+
+## Key Features
+
+### 1. Workspace Management
+- **Lifecycle**: Create, update, and delete workspaces.
+- **Membership**: Add/remove members and manage their roles.
+- **Diagnostics**: Endpoints to debug access issues (`/workspaces/diagnostic`).
+
+### 2. Team Wallet Integration
+- **Shared Funds**: Centralized token balance for the team.
+- **Token Requests**: Members request tokens; admins approve/deny.
+- **Spending Limits**: Per-user caps on token usage.
+
+## API Endpoints
+
+### Core Workspace
+- `POST /workspaces` - Create workspace
+- `GET /workspaces` - List my workspaces
+- `PUT /workspaces/{id}/members` - Manage members
+
+### Team Wallet
+- `GET /workspaces/{id}/wallet` - Get wallet info
+- `POST /workspaces/{id}/wallet/token-requests` - Request tokens
+- `POST /workspaces/{id}/wallet/token-requests/{req_id}/review` - Approve/Deny request
+
+## Usage Example
+
+### Creating a Workspace
+
+```python
+response = await client.post("/workspaces", json={
+    "name": "Engineering Team",
+    "description": "Core dev team workspace"
+})
+workspace_id = response["workspace_id"]
+```
 """
 
 from datetime import datetime

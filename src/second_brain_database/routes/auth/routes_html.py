@@ -1,5 +1,83 @@
 """
-HTML page rendering for authentication routes (password reset, etc).
+# Authentication HTML Rendering
+
+This module provides **server-side HTML rendering** for authentication-related web pages,
+primarily for browser-based password reset flows and security notifications. It generates
+fully-styled, accessible HTML pages that are served directly by the API.
+
+## Key Features
+
+### 1. Password Reset Page
+- **Cloudflare Turnstile Integration**: CAPTCHA widget for bot protection
+- **Client-Side Validation**: Password matching and strength checks
+- **Responsive Design**: Mobile-friendly layout with modern CSS
+- **Accessibility**: ARIA labels, semantic HTML, keyboard navigation
+
+### 2. Security Notification Emails
+- **IP Lockdown Alerts**: Styled emails for blocked IP access attempts
+- **User-Agent Lockdown Alerts**: Notifications for untrusted device access
+- **Action Buttons**: One-click "Allow Once" or "Add to Trusted List" links
+- **Rich Formatting**: Professional HTML email templates with inline CSS
+
+### 3. Login Page
+- **Dual Authentication**: Traditional password + WebAuthn passwordless support
+- **Modern UI**: Gradient backgrounds, smooth transitions, responsive layout
+- **Security Features**: HTTPS enforcement, CSRF protection
+
+## Rendered Pages
+
+### Password Reset Flow
+1. User clicks "Forgot Password" link in email
+2. Server renders `render_reset_password_page()` with embedded token
+3. User enters new password and completes CAPTCHA
+4. Client-side JavaScript submits to `/auth/reset-password`
+
+### Security Notification Flow
+1. Lockdown violation detected (IP or User-Agent)
+2. Server sends HTML email via `render_blocked_ip_notification_email()`
+3. Email includes action buttons with time-limited tokens
+4. User clicks button to allow access or add to trusted list
+
+## Usage Examples
+
+### Rendering Password Reset Page
+
+```python
+@router.get("/reset-password")
+async def reset_password_page(token: str):
+    return render_reset_password_page(token)
+```
+
+### Sending Security Alert Email
+
+```python
+email_html = render_blocked_ip_notification_email(
+    attempted_ip="203.0.113.42",
+    trusted_ips=["192.168.1.1", "10.0.0.5"],
+    endpoint="POST /auth/login",
+    timestamp="2024-01-15 14:30 UTC",
+    allow_once_token="temp_abc123",
+    add_to_trusted_token="trust_xyz789"
+)
+await send_email(user_email, "Security Alert", email_html)
+```
+
+## Security Considerations
+
+### CAPTCHA Integration
+- **Turnstile Sitekey**: Injected from environment variable (`TURNSTILE_SITEKEY`)
+- **Token Validation**: Server-side verification in `/auth/reset-password` endpoint
+- **Fallback**: Graceful degradation if sitekey is missing
+
+### Email Action Tokens
+- **Time-Limited**: Tokens expire after 15 minutes
+- **Single-Use**: Consumed upon first use to prevent replay attacks
+- **Scoped**: Tokens are specific to the user and action type
+
+## Module Attributes
+
+Attributes:
+    TURNSTILE_SITEKEY_PLACEHOLDER (str): Placeholder for CAPTCHA sitekey injection
 """
 
 from typing import List

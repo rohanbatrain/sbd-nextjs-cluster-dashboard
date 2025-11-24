@@ -1,7 +1,30 @@
-"""Adapter service to convert between ChatService and LangGraph formats.
+"""
+# LangGraph Adapter
 
-This service bridges the existing ChatService implementation with the
-LangGraph SDK expectations, converting data models and streaming formats.
+This module provides the **Adapter Service** to bridge the existing ChatService with LangGraph SDK.
+It converts internal data models and streaming formats to match LangGraph expectations.
+
+## Domain Overview
+
+The LangGraph SDK expects specific data structures for Threads, Messages, and Events.
+This adapter ensures seamless integration without rewriting the core ChatService logic.
+
+## Key Features
+
+### 1. Data Conversion
+- **Session to Thread**: Maps `ChatSession` to LangGraph `Thread`.
+- **Message Format**: Converts `ChatMessage` to LangGraph message dicts (human/ai/system).
+
+### 2. Stream Adaptation
+- **Event Mapping**: Translates internal stream events (token, error, done) to LangGraph events (updates, error, end).
+- **SSE Formatting**: Formats the output as Server-Sent Events compatible with the SDK.
+
+## Usage Example
+
+```python
+adapter = LangGraphAdapter(chat_service)
+thread = adapter.session_to_thread(session)
+```
 """
 
 from datetime import datetime, timezone

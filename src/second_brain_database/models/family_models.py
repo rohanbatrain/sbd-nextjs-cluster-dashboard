@@ -1,8 +1,67 @@
 """
-Pydantic models for family management system.
+# Family Management Models
 
-This module contains all request/response models, validation schemas,
-and data transfer objects for the family management functionality.
+This module defines the **core data structures** for the Family Hub system, including family groups,
+member relationships, virtual economy (SBD tokens), and notification systems. It uses Pydantic
+models for robust validation of all API requests and database documents.
+
+## Domain Model Overview
+
+The family domain is built around the following key entities:
+
+- **Family**: The central group unit containing members, settings, and a shared SBD account.
+- **Member**: A user's membership within a family, including roles (admin/member) and permissions.
+- **Relationship**: Bidirectional links between members (e.g., Parent ↔ Child, Sibling ↔ Sibling).
+- **SBD Account**: A virtual bank account for the family with transaction history and spending limits.
+- **Token Request**: A workflow for members to request tokens from admins.
+- **Purchase Request**: A workflow for members to request real-world purchases using SBD tokens.
+
+## Validation Rules
+
+### 1. Relationships
+- **Bidirectional Consistency**: Relationships must be reciprocal (e.g., if A is parent of B, B must be child of A).
+- **Type Validation**: Only specific relationship types are allowed (defined in `RELATIONSHIP_TYPES`).
+
+### 2. Financials
+- **Non-Negative Values**: Token amounts and costs must be positive integers.
+- **Spending Limits**: Can be set to specific amounts or -1 for unlimited.
+
+### 3. Identifiers
+- **Family Names**: Must be at least 2 characters and cannot start with reserved prefixes.
+- **User IDs**: Must be valid system identifiers.
+
+## Usage Examples
+
+### Creating a Family Request
+
+```python
+try:
+    request = CreateFamilyRequest(
+        name="The Robinsons",
+        admin_email="admin@robinson.family"
+    )
+    # Validates name length and format
+except ValidationError as e:
+    print(f"Invalid family name: {e}")
+```
+
+### Managing Permissions
+
+```python
+# Grant unlimited spending to a parent
+perms = UpdateSpendingPermissionsRequest(
+    user_id="user_123",
+    can_spend=True,
+    spending_limit=-1
+)
+```
+
+## Module Attributes
+
+Attributes:
+    RELATIONSHIP_TYPES (Dict[str, str]): Mapping of relationship types to their reciprocals.
+        Used for validating and creating bidirectional links.
+    NOTIFICATION_TYPES (List[str]): Allowed types for family notifications.
 """
 
 from datetime import datetime
@@ -48,7 +107,16 @@ NOTIFICATION_TYPES = [
 
 # Request Models
 class CreateFamilyRequest(BaseModel):
-    """Request model for creating a new family."""
+    """
+    Request model for creating a new family group.
+
+    Families are the core unit of organization. This request initializes a new family
+    with the requester as the first admin.
+
+    **Validation:**
+    *   **name**: Optional. If provided, must be 2-100 chars and cannot use reserved prefixes
+        like 'admin_' or 'system_'.
+    """
 
     name: Optional[str] = Field(None, max_length=100, description="Optional custom family name")
 
@@ -68,7 +136,14 @@ class CreateFamilyRequest(BaseModel):
 
 
 class InviteMemberRequest(BaseModel):
-    """Request model for inviting a family member."""
+    """
+    Request model for inviting a new member to the family.
+
+    **Validation:**
+    *   **identifier**: Can be an email or username. Must not be empty.
+    *   **relationship_type**: Must be a valid type from `RELATIONSHIP_TYPES` (e.g., 'parent', 'child').
+        This defines the relationship *from the inviter to the invitee*.
+    """
 
     identifier: str = Field(..., description="Email address or username of the user to invite")
     identifier_type: Literal["email", "username"] = Field("email", description="Type of identifier provided")
@@ -93,13 +168,27 @@ class InviteMemberRequest(BaseModel):
 
 
 class RespondToInvitationRequest(BaseModel):
-    """Request model for responding to a family invitation."""
+    """
+    Request model for accepting or declining a family invitation.
+
+    **Actions:**
+    *   **accept**: Joins the family and establishes the defined relationship.
+    *   **decline**: Marks the invitation as declined; user does not join.
+    """
 
     action: Literal["accept", "decline"] = Field(..., description="Action to take on the invitation")
 
 
 class UpdateRelationshipRequest(BaseModel):
-    """Request model for updating a family relationship."""
+    """
+    Request model for modifying the relationship between two family members.
+
+    Relationships are strictly bidirectional. Both directions must be provided and
+    must be reciprocals of each other (e.g., Parent <-> Child).
+
+    **Validation:**
+    *   Types must exist in `RELATIONSHIP_TYPES`.
+    """
 
     relationship_type_a_to_b: str = Field(..., description="Relationship type from user A to user B")
     relationship_type_b_to_a: str = Field(..., description="Relationship type from user B to user A")
@@ -115,7 +204,14 @@ class UpdateRelationshipRequest(BaseModel):
 
 
 class UpdateSpendingPermissionsRequest(BaseModel):
-    """Request model for updating family member spending permissions."""
+    """
+    Request model for configuring a member's SBD token spending rights.
+
+    **Controls:**
+    *   **can_spend**: Boolean toggle to enable/disable spending entirely.
+    *   **spending_limit**: Maximum tokens spendable per period (implementation dependent).
+        Set to `-1` for unlimited spending.
+    """
 
     user_id: str = Field(..., description="ID of the user to update permissions for")
     spending_limit: int = Field(..., ge=-1, description="Spending limit (-1 for unlimited)")
@@ -130,7 +226,15 @@ class UpdateSpendingPermissionsRequest(BaseModel):
 
 
 class FreezeAccountRequest(BaseModel):
-    """Request model for freezing/unfreezing family SBD account."""
+    """
+    Request model for emergency freezing of the family SBD account.
+
+    Freezing prevents all spending transactions. Used by admins in case of
+    suspicious activity or parental control enforcement.
+
+    **Validation:**
+    *   **reason**: Required when action is 'freeze'.
+    """
 
     action: Literal["freeze", "unfreeze"] = Field(..., description="Action to take on the account")
     reason: Optional[str] = Field(None, max_length=500, description="Reason for freezing the account")
@@ -144,7 +248,15 @@ class FreezeAccountRequest(BaseModel):
 
 
 class CreateTokenRequestRequest(BaseModel):
-    """Request model for creating a token request."""
+    """
+    Request model for a member to ask for SBD tokens.
+
+    Members can request tokens from the family admin for chores, rewards, or allowances.
+
+    **Validation:**
+    *   **amount**: Must be positive.
+    *   **reason**: Required, min 5 chars.
+    """
 
     amount: int = Field(..., gt=0, description="Amount of tokens requested")
     reason: str = Field(..., max_length=500, description="Reason for the token request")
@@ -161,7 +273,13 @@ class CreateTokenRequestRequest(BaseModel):
 
 
 class ReviewTokenRequestRequest(BaseModel):
-    """Request model for reviewing a token request."""
+    """
+    Request model for an admin to approve or deny a token request.
+
+    **Actions:**
+    *   **approve**: Transfers tokens from family account to requester.
+    *   **deny**: Rejects the request.
+    """
 
     action: Literal["approve", "deny"] = Field(..., description="Action to take on the request")
     comments: Optional[str] = Field(None, max_length=1000, description="Admin comments on the decision")
@@ -173,26 +291,44 @@ class ReviewTokenRequestRequest(BaseModel):
 
 
 class AdminActionRequest(BaseModel):
-    """Request model for admin promotion/demotion."""
+    """
+    Request model for promoting or demoting a family admin.
+
+    **Actions:**
+    *   **promote**: Grants full admin privileges.
+    *   **demote**: Revokes admin privileges (cannot demote the last admin).
+    """
 
     action: Literal["promote", "demote"] = Field(..., description="Action to take")
 
 
 class BackupAdminRequest(BaseModel):
-    """Request model for backup admin designation/removal."""
+    """
+    Request model for managing backup admins in the succession plan.
+
+    Backup admins are notified if the primary admin account becomes inactive.
+    """
 
     action: Literal["designate", "remove"] = Field(..., description="Action to take on backup admin")
 
 
 class AdminActionsLogRequest(BaseModel):
-    """Request model for getting admin actions log."""
+    """
+    Request model for retrieving the audit log of admin actions.
+
+    Supports pagination via `limit` and `offset`.
+    """
 
     limit: int = Field(50, ge=1, le=100, description="Maximum number of records to return")
     offset: int = Field(0, ge=0, description="Number of records to skip")
 
 
 class UpdateNotificationPreferencesRequest(BaseModel):
-    """Request model for updating notification preferences."""
+    """
+    Request model for customizing family notification settings.
+
+    Allows users to toggle specific channels (Email, Push, SMS) and event types.
+    """
 
     email_notifications: bool = Field(True, description="Enable email notifications")
     push_notifications: bool = Field(True, description="Enable push notifications")
@@ -203,7 +339,9 @@ class UpdateNotificationPreferencesRequest(BaseModel):
 
 
 class MarkNotificationsReadRequest(BaseModel):
-    """Request model for marking notifications as read."""
+    """
+    Request model for bulk-marking notifications as read.
+    """
 
     notification_ids: List[str] = Field(..., description="List of notification IDs to mark as read")
 
@@ -217,14 +355,14 @@ class MarkNotificationsReadRequest(BaseModel):
 
 # --- Models for Purchase Requests ---
 class PurchaseRequestUserInfo(BaseModel):
-    """Information about a user involved in a purchase request."""
+    """Snapshot of user info for purchase requests."""
 
     user_id: str
     username: str
 
 
 class PurchaseRequestItemInfo(BaseModel):
-    """Information about the item being requested."""
+    """Details of the item requested for purchase."""
 
     item_id: str
     name: str
@@ -233,7 +371,11 @@ class PurchaseRequestItemInfo(BaseModel):
 
 
 class PurchaseRequestResponse(BaseModel):
-    """Response model for a single purchase request."""
+    """
+    Response model for a purchase request.
+
+    Purchase requests allow members to ask admins to buy real-world items using SBD tokens.
+    """
 
     request_id: str
     family_id: str
@@ -247,7 +389,11 @@ class PurchaseRequestResponse(BaseModel):
 
 
 class DenyPurchaseRequest(BaseModel):
-    """Request model for denying a purchase request."""
+    """
+    Request model for denying a purchase request.
+
+    Requires a reason to explain the denial to the requester.
+    """
 
     reason: Optional[str] = Field(None, max_length=500, description="Optional reason for denial")
 
@@ -257,7 +403,13 @@ class DenyPurchaseRequest(BaseModel):
 
 # Response Models
 class MemberPermissionsResponse(BaseModel):
-    """Response model for member permissions."""
+    """
+    Response model for a member's spending permissions.
+
+    **Fields:**
+    *   **spending_limit**: -1 indicates unlimited spending.
+    *   **can_spend**: Master toggle for spending ability.
+    """
 
     role: str
     spending_limit: int
@@ -267,7 +419,13 @@ class MemberPermissionsResponse(BaseModel):
 
 
 class SBDAccountResponse(BaseModel):
-    """Response model for family SBD account information."""
+    """
+    Response model for the family's shared SBD token account.
+
+    **Privacy:**
+    *   **member_permissions**: Only visible to admins.
+    *   **recent_transactions**: Limited to last 5-10 entries for summary views.
+    """
 
     account_username: str
     balance: int
@@ -280,7 +438,13 @@ class SBDAccountResponse(BaseModel):
 
 
 class FamilySettingsResponse(BaseModel):
-    """Response model for family settings."""
+    """
+    Response model for family configuration settings.
+
+    **Fields:**
+    *   **visibility**: 'public' (searchable) or 'private' (invite-only).
+    *   **auto_approval_threshold**: Token requests below this amount are auto-approved.
+    """
 
     allow_member_invites: bool
     visibility: str
@@ -289,14 +453,26 @@ class FamilySettingsResponse(BaseModel):
 
 
 class SuccessionPlanResponse(BaseModel):
-    """Response model for succession plan."""
+    """
+    Response model for the family's admin succession plan.
+
+    Ensures continuity if the primary admin loses access.
+    """
 
     backup_admins: List[str]
     recovery_contacts: List[str]
 
 
 class FamilyResponse(BaseModel):
-    """Response model for family information."""
+    """
+    Response model for full family details.
+
+    The central object returned when viewing a family dashboard.
+
+    **Context:**
+    *   **user_role**: The requesting user's role in this family (e.g., 'admin', 'member').
+    *   **is_admin**: Shortcut boolean for frontend logic.
+    """
 
     family_id: str
     name: str
@@ -314,7 +490,11 @@ class FamilyResponse(BaseModel):
 
 
 class RelationshipResponse(BaseModel):
-    """Response model for family relationship information."""
+    """
+    Response model for a single family relationship.
+
+    Represents a directed link (e.g., "User A is parent of User B").
+    """
 
     relationship_id: str
     related_user_id: str
@@ -325,7 +505,11 @@ class RelationshipResponse(BaseModel):
 
 
 class FamilyMemberResponse(BaseModel):
-    """Response model for family member information."""
+    """
+    Response model for a family member's profile.
+
+    Includes their role, permissions, and relationships to other members.
+    """
 
     user_id: str
     username: str
@@ -338,7 +522,9 @@ class FamilyMemberResponse(BaseModel):
 
 
 class InvitationResponse(BaseModel):
-    """Response model for family invitation information."""
+    """
+    Response model for a pending or processed invitation.
+    """
 
     invitation_id: str
     family_id: str
@@ -357,7 +543,11 @@ class InvitationResponse(BaseModel):
 
 
 class TokenRequestResponse(BaseModel):
-    """Response model for token request information."""
+    """
+    Response model for a token request.
+
+    Shows the status of a request (pending, approved, denied) and any admin feedback.
+    """
 
     request_id: str
     family_id: str
@@ -376,7 +566,13 @@ class TokenRequestResponse(BaseModel):
 
 
 class NotificationResponse(BaseModel):
-    """Response model for family notification information."""
+    """
+    Response model for a user notification.
+
+    **Fields:**
+    *   **data**: Arbitrary JSON payload with context (e.g., transaction ID, user ID).
+    *   **is_read**: Boolean flag for UI styling.
+    """
 
     notification_id: str
     family_id: str
@@ -392,7 +588,11 @@ class NotificationResponse(BaseModel):
 
 
 class FamilyUsageResponse(BaseModel):
-    """Response model for family usage information."""
+    """
+    Response model for family resource usage.
+
+    Tracks member counts against plan limits.
+    """
 
     family_id: str
     family_name: str
@@ -403,7 +603,11 @@ class FamilyUsageResponse(BaseModel):
 
 
 class FamilyLimitsResponse(BaseModel):
-    """Response model for family limits information."""
+    """
+    Response model for system-wide family limits.
+
+    Used to enforce subscription tiers (e.g., max families per user).
+    """
 
     max_families_allowed: int
     max_members_per_family: int
@@ -415,7 +619,9 @@ class FamilyLimitsResponse(BaseModel):
 
 
 class AdminActionResponse(BaseModel):
-    """Response model for admin promotion/demotion actions."""
+    """
+    Response model for the result of an admin promotion/demotion.
+    """
 
     family_id: str
     target_user_id: str
@@ -430,7 +636,9 @@ class AdminActionResponse(BaseModel):
 
 
 class BackupAdminResponse(BaseModel):
-    """Response model for backup admin designation/removal."""
+    """
+    Response model for backup admin updates.
+    """
 
     family_id: str
     backup_user_id: str
@@ -445,7 +653,12 @@ class BackupAdminResponse(BaseModel):
 
 
 class AdminActionLogEntry(BaseModel):
-    """Model for individual admin action log entry."""
+    """
+    Model representing a single audit log entry for admin actions.
+
+    **Fields:**
+    *   **details**: JSON blob with action-specific metadata (e.g., old_role, new_role).
+    """
 
     action_id: str
     family_id: str
@@ -461,7 +674,9 @@ class AdminActionLogEntry(BaseModel):
 
 
 class AdminActionsLogResponse(BaseModel):
-    """Response model for admin actions log."""
+    """
+    Response model for a paginated list of admin audit logs.
+    """
 
     family_id: str
     actions: List[AdminActionLogEntry]
@@ -469,7 +684,11 @@ class AdminActionsLogResponse(BaseModel):
 
 
 class FamilyStatsResponse(BaseModel):
-    """Response model for family statistics."""
+    """
+    Response model for global family system statistics.
+
+    Used by system admins to monitor platform usage.
+    """
 
     total_families: int
     total_members: int
@@ -483,7 +702,9 @@ class FamilyStatsResponse(BaseModel):
 
 
 class DatabaseMigrationResponse(BaseModel):
-    """Response model for database migration operations."""
+    """
+    Response model for database migration job status.
+    """
 
     migration_id: str
     operation: str
@@ -497,7 +718,9 @@ class DatabaseMigrationResponse(BaseModel):
 
 
 class BackupResponse(BaseModel):
-    """Response model for database backup operations."""
+    """
+    Response model for database backup job status.
+    """
 
     backup_id: str
     backup_type: str
@@ -512,7 +735,12 @@ class BackupResponse(BaseModel):
 
 # Database Schema Models (for internal use)
 class FamilyDocument(BaseModel):
-    """Database document model for families collection."""
+    """
+    MongoDB document model for the `families` collection.
+
+    Stores the core family configuration, including the embedded SBD account
+    and settings.
+    """
 
     family_id: str
     name: str
@@ -560,7 +788,11 @@ class FamilyDocument(BaseModel):
 
 
 class FamilyRelationshipDocument(BaseModel):
-    """Database document model for family_relationships collection."""
+    """
+    MongoDB document model for the `family_relationships` collection.
+
+    Represents a directed edge in the family graph.
+    """
 
     relationship_id: str
     family_id: str
@@ -608,7 +840,9 @@ class FamilyRelationshipDocument(BaseModel):
 
 
 class FamilyInvitationDocument(BaseModel):
-    """Database document model for family_invitations collection."""
+    """
+    MongoDB document model for the `family_invitations` collection.
+    """
 
     invitation_id: str
     family_id: str
@@ -660,7 +894,9 @@ class FamilyInvitationDocument(BaseModel):
 
 
 class FamilyNotificationDocument(BaseModel):
-    """Database document model for family_notifications collection."""
+    """
+    MongoDB document model for the `family_notifications` collection.
+    """
 
     notification_id: str
     family_id: str
@@ -715,7 +951,9 @@ class FamilyNotificationDocument(BaseModel):
 
 
 class FamilyTokenRequestDocument(BaseModel):
-    """Database document model for family_token_requests collection."""
+    """
+    MongoDB document model for the `family_token_requests` collection.
+    """
 
     request_id: str
     family_id: str

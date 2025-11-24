@@ -1,8 +1,78 @@
 """
-Skill Log API routes.
+# Skill Log Routes
 
-Comprehensive FastAPI router for skill tracking and logging functionality,
-following established patterns from workspace routes.
+This module provides the **REST API endpoints** for the Skill Tracking System ("Skill Log").
+It enables users to define, track, and analyze their personal and professional growth.
+
+## Domain Overview
+
+The Skill Log is a gamified system for tracking competence acquisition:
+- **Skills**: Discrete abilities or knowledge areas (e.g., "Python", "Public Speaking").
+- **Hierarchy**: Skills can be nested (e.g., "Backend Dev" -> "Python" -> "FastAPI").
+- **Logs**: Time-series data points tracking progress (e.g., "Completed tutorial").
+- **Analytics**: Metrics like "XP", "Level", and "Consistency".
+
+## Key Features
+
+### 1. Skill Management
+- **CRUD**: Create, read, update, and delete skills.
+- **Linking**: Establish parent-child relationships to build a Skill Tree.
+- **Tagging**: Organize skills with flexible tags.
+
+### 2. Progress Tracking
+- **Logging**: Record learning sessions, milestones, or practice time.
+- **Levels**: Automatic calculation of skill levels based on logged activity.
+- **Context**: Attach project references or notes to log entries.
+
+### 3. Visualization & Analytics
+- **Skill Tree**: Hierarchical view of all skills.
+- **Heatmaps**: Activity visualization (future scope).
+- **Stats**: Total hours, sessions, and current streak.
+
+## API Endpoints
+
+### Skills
+- `POST /api/v1/skills/` - Create skill
+- `GET /api/v1/skills/` - List skills
+- `GET /api/v1/skills/tree` - Get hierarchy
+- `GET /api/v1/skills/{id}` - Get details
+- `PUT /api/v1/skills/{id}` - Update skill
+- `DELETE /api/v1/skills/{id}` - Delete skill
+
+### Relationships
+- `POST .../link/{parent_id}` - Add parent
+- `DELETE .../link/{parent_id}` - Remove parent
+
+### Logs
+- `GET .../{id}/logs` - View history
+- `POST .../{id}/logs` - Add entry
+
+## Usage Examples
+
+### Creating a Skill
+
+```python
+response = await client.post("/api/v1/skills/", json={
+    "name": "Machine Learning",
+    "description": "Study of algorithms that improve through experience",
+    "tags": ["AI", "CS"]
+})
+```
+
+### Logging Progress
+
+```python
+await client.post(f"/api/v1/skills/{skill_id}/logs", json={
+    "duration_minutes": 120,
+    "notes": "Completed Coursera Week 1",
+    "progress_state": "active"
+})
+```
+
+## Module Attributes
+
+Attributes:
+    router (APIRouter): FastAPI router with `/api/v1/skills` prefix
 """
 
 from typing import Any, Dict, List, Optional

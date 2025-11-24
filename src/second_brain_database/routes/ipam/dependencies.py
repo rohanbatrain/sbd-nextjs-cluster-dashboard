@@ -1,11 +1,38 @@
 """
-IPAM Authentication and Authorization Dependencies.
+# IPAM Dependencies
 
-This module provides FastAPI dependency functions for enforcing security policies
-on IPAM endpoints, including:
-- JWT authentication
-- RBAC permission checks
-- Rate limiting for IPAM operations
+This module provides **security and policy enforcement** for the IPAM System.
+It handles authentication, RBAC permission checks, and rate limiting specific to IP management.
+
+## Security Model
+
+IPAM operations are protected by a granular permission system:
+- **Read**: View IP allocations and stats (`ipam:read`).
+- **Allocate**: Create new regions or hosts (`ipam:allocate`).
+- **Update**: Modify existing resources (`ipam:update`).
+- **Release**: Delete/Free resources (`ipam:release`).
+- **Admin**: Full administrative control (`ipam:admin`).
+
+## Key Features
+
+### 1. RBAC Enforcement
+- **Dependency Injection**: `require_ipam_permission` checks user roles.
+- **Granularity**: Separate dependencies for each action type (Read/Write/Admin).
+
+### 2. Rate Limiting
+- **Redis-Backed**: Tracks request counts per user/operation.
+- **Quotas**: Prevents abuse (e.g., rapid region creation).
+
+## Usage Example
+
+```python
+@router.post("/regions")
+async def create_region(
+    user: dict = Depends(require_ipam_allocate)
+):
+    # Only users with 'ipam:allocate' permission reach here
+    ...
+```
 """
 
 from typing import Dict, Any

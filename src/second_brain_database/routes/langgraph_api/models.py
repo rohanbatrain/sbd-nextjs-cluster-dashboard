@@ -1,7 +1,35 @@
-"""LangGraph Cloud API-compatible data models.
+"""
+# LangGraph Models
 
-These models match the expected format of the @langchain/langgraph-sdk
-to ensure compatibility with the frontend.
+This module defines the **Pydantic models** compatible with the LangGraph Cloud API.
+These models ensure that the backend response matches what the `@langchain/langgraph-sdk` expects.
+
+## Domain Overview
+
+LangGraph uses a specific schema for Threads, Runs, and State.
+- **Thread**: Represents a conversation history.
+- **ThreadValues**: The current state (messages) of the thread.
+- **StreamRequest**: Configuration for running a graph.
+
+## Key Models
+
+### 1. Thread Models
+- **Thread**: The main container for conversation state.
+- **ThreadMetadata**: Arbitrary key-value pairs attached to a thread.
+
+### 2. Execution Models
+- **RunInput**: Input data for starting a graph run.
+- **StreamRequest**: Parameters for streaming execution (stream mode, config).
+
+## Usage Example
+
+```python
+thread = Thread(
+    thread_id="session_123",
+    created_at=datetime.now(),
+    metadata=ThreadMetadata(user_id="user_1")
+)
+```
 """
 
 from datetime import datetime

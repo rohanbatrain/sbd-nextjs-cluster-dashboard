@@ -81,17 +81,90 @@ class ComplianceReportError(TeamAuditError):
         super().__init__(message, "COMPLIANCE_REPORT_ERROR", {"report_type": report_type, "team_id": team_id})
 
 
+class TeamWalletManager:
+    """
+    Manages team SBD wallet operations with permissions, requests, and audit logging.
+
+    Provides comprehensive team wallet management following established codebase
+    patterns for security, multi-tenancy, and dependency injection.
+
+    **Core Features:**
+    - **Wallet initialization**: Virtual account creation for teams
+    - **Token requests**: Member token request workflow with auto-approval
+    - **Spending permissions**: Granular member spending control
+    - **Account freeze**: Emergency account freeze/unfreeze
+    - **Audit logging**: Comprehensive transaction audit trails
+    - **Emergency recovery**: Backup admin emergency unfreeze
+
+    **Wallet Operations:**
+    - Initialize team wallet with virtual account
+    - Get wallet info (balance, permissions, transactions)
+    - Create and review token requests
+    - Update spending permissions per member
+    - Freeze/unfreeze team accounts
+
+    **Token Request Workflow:**
+    - Members create token requests with amount and reason
+    - Auto-approval for amounts below threshold
+    - Admin review for amounts above threshold
+    - Automatic expiry after 7 days
+    - Comprehensive audit logging
+
+    **Spending Permissions:**
+    - Per-member spending limits
+    - Admin unlimited spending by default
+    - Configurable spending limits
+    - Permission change audit logging
+
+    **Emergency Features:**
+    - Backup admin designation
+    - Emergency account unfreeze
+    - Recovery operation audit trails
+
+    **Collections:**
+    - `workspaces`: Team workspace documents with SBD account info
+    - `team_token_requests`: Token request documents
+    - `team_transactions`: Transaction history
+    - `team_audit_log`: Audit trail records
+    """
 class TeamAuditManager:
     """
-    Enterprise-grade team audit management system for SBD token compliance.
+    Enterprise-grade audit management system for team SBD token compliance and security.
 
-    This manager implements comprehensive audit trail management with:
-    - Immutable audit trail logging with cryptographic integrity
-    - Team member attribution in all transactions
-    - Compliance reporting for regulatory requirements
-    - Transaction history retrieval with team context
-    - Audit trail export capabilities
-    - Real-time audit event streaming
+    Provides comprehensive audit trail logging, transaction attribution, compliance reporting,
+    and suspicious activity detection for regulatory requirements.
+
+    **Core Features:**
+    - **Immutable audit trails**: Cryptographic integrity with SHA-256 hash verification
+    - **Transaction attribution**: Team member attribution in all transactions
+    - **Compliance reporting**: Regulatory-compliant reports (JSON, CSV, PDF)
+    - **Audit trail export**: Export capabilities for regulatory requirements
+    - **Data retention**: 7-year retention for financial compliance (2,555 days)
+
+    **Audit Trail Components:**
+    - Transaction details (amount, accounts, type)
+    - Team member attribution (ID, username, timestamp)
+    - Transaction context (IP, user agent, metadata)
+    - Compliance metadata (retention, regulatory flags)
+    - Integrity hash (SHA-256 for tamper detection)
+
+    **Audit Event Types:**
+    - `sbd_transaction`: SBD token transactions
+    - `permission_change`: Spending permission modifications
+    - `account_freeze`: Account freeze/unfreeze actions
+    - `admin_action`: Administrative operations
+    - `compliance_export`: Compliance data exports
+    - `audit_access`: Audit trail access logs
+
+    **Compliance Features:**
+    - **Regulatory reporting**: Automated compliance report generation
+    - **Audit trail integrity**: Cryptographic verification
+    - **Data export**: Multiple formats for auditors (JSON, CSV, PDF)
+    - **Retention policies**: Automatic data lifecycle management
+
+    **Collections:**
+    - `team_audit_trails`: Immutable audit records
+    - `team_audit_summaries`: Aggregated audit data
     """
 
     def __init__(self, db_manager=None) -> None:

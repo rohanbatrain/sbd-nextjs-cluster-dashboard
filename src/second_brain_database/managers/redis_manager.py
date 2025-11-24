@@ -29,12 +29,18 @@ REDIS_UNAVAILABLE_MSG: str = "Rate limiting service unavailable. Please try agai
 
 class RedisManager:
     """
-    Manages a single Redis connection for the application.
+    Manages Redis connections with automatic failover and connection pooling.
 
-    Attributes:
-        redis_url: The Redis connection URL.
-        _redis: The cached Redis connection instance.
-        logger: The logger instance for this manager.
+    Provides a robust, production-ready Redis client with:
+    - **Automatic failover**: Tries local Redis first, then configured URL
+    - **Fail-fast startup**: Exits process if no Redis available
+    - **Async support**: Uses `redis.asyncio` for non-blocking operations
+    - **JSON serialization**: Automatic JSON encoding/decoding
+    - **Connection pooling**: Reuses connections for efficiency
+
+    **Attributes:**
+        redis_url: The active Redis connection URL.
+        _redis: Cached async Redis connection instance.
     """
 
     def __init__(self) -> None:

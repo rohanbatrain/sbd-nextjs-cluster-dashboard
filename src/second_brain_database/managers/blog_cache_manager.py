@@ -18,11 +18,34 @@ logger = get_logger(prefix="[BlogCache]")
 
 class BlogCacheManager:
     """
-    Comprehensive Redis caching manager for blog operations.
+    Provides comprehensive Redis-based caching for blog operations with intelligent invalidation.
 
-    Provides caching for posts, categories, search results, analytics,
-    and user permissions with website-level isolation and intelligent
-    cache invalidation.
+    Manages multi-layered caching for posts, categories, search results, analytics,
+    and user permissions with website-level isolation.
+
+    **Cache Layers:**
+    - **Website data**: Website metadata and settings (TTL: 1 hour)
+    - **Posts**: Individual posts by ID and slug (TTL: 30 minutes)
+    - **Posts lists**: Paginated post lists with filters (TTL: 10 minutes)
+    - **Categories**: Website categories (TTL: 30 minutes)
+    - **Comments**: Post comments by status (TTL: 5 minutes)
+    - **Analytics**: Aggregated analytics data (TTL: 15 minutes)
+    - **Search results**: Search query results with filters (TTL: 5 minutes)
+    - **User permissions**: User role and permissions (TTL: 10 minutes)
+
+    **Cache Invalidation:**
+    - **Post update**: Invalidates post cache (by ID and slug)
+    - **Website update**: Invalidates all website-related caches
+    - **Permission change**: Invalidates user permission cache
+
+    **Key Patterns:**
+    - `blog:website:{website_id}` - Website data
+    - `blog:website:{website_id}:post:{post_id}` - Post by ID
+    - `blog:website:{website_id}:post:slug:{slug}` - Post by slug
+    - `blog:website:{website_id}:posts:{status}:page:{page}` - Posts list
+    - `blog:website:{website_id}:categories` - Categories
+    - `blog:website:{website_id}:analytics:days:{days}` - Analytics
+    - `blog:user:{user_id}:website:{website_id}:permissions` - Permissions
     """
 
     def __init__(self, redis_manager=None):

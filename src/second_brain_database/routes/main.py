@@ -1,4 +1,46 @@
-"""Main routes module for the Second Brain Database API."""
+"""
+# Main API Routes
+
+This module provides the **Core System Endpoints** for the Second Brain Database API.
+It handles health checks, root verification, and third-party integrations (AdMob).
+
+## Domain Overview
+
+These routes serve as the entry point and monitoring layer for the API.
+- **Health Checks**: Liveness, Readiness, and comprehensive system status.
+- **Integrations**: Server-Side Verification (SSV) for AdMob rewards.
+- **Root**: Basic API info and connectivity check.
+
+## Key Features
+
+### 1. Health Monitoring
+- **`/health`**: Comprehensive check (DB, Redis, API).
+- **`/healthz`**: Lightweight liveness probe for K8s.
+- **`/ready`**: Readiness probe ensuring DB connectivity.
+- **`/live`**: Simple service-up check.
+
+### 2. AdMob Integration
+- **SSV Callback**: Verifies cryptographic signatures from Google AdMob.
+- **Reward Processing**: Credits users with SBD tokens or items (themes/avatars) upon ad completion.
+- **Fraud Prevention**: Checks for duplicate transaction IDs and verifies signatures.
+
+## API Endpoints
+
+- `GET /` - API Root info
+- `GET /health` - Full system health
+- `GET /healthz` - K8s liveness
+- `GET /ready` - K8s readiness
+- `GET /rewards/admob-ssv` - AdMob callback handler
+
+## Usage Example
+
+```python
+# Check system health
+response = await client.get("/health")
+if response.json()["status"] == "healthy":
+    print("System operational")
+```
+"""
 
 import asyncio
 import base64

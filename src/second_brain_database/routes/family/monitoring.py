@@ -1,25 +1,79 @@
 """
-Family Security Monitoring and Metrics Collection.
+# Family Security Monitoring
 
-This module provides comprehensive monitoring, metrics collection, and alerting
-for family management security operations. It integrates with the existing
-logging infrastructure and provides real-time security monitoring capabilities.
+This module implements a **comprehensive security monitoring system** specifically designed for
+Family Hub operations. It provides real-time threat detection, metrics collection, and
+automated alerting for security anomalies.
 
-Features:
-    - Real-time security event monitoring
-    - Metrics collection for Prometheus integration
-    - Automated alerting for security violations
-    - Performance monitoring for family operations
-    - Audit trail management and retention
-    - Security dashboard data aggregation
+## Domain Overview
 
-Monitoring Categories:
-    - Authentication and authorization events
-    - Rate limiting violations and patterns
-    - 2FA enforcement and bypass attempts
-    - Temporary token usage and abuse
-    - IP/User Agent lockdown violations
-    - Admin privilege escalations and changes
+Security in a family context requires balancing usability with safety. This monitor tracks:
+- **Authentication**: Login attempts, 2FA failures.
+- **Authorization**: Permission checks, admin privilege usage.
+- **Financial Safety**: Spending limit violations, unusual token transfers.
+- **Infrastructure**: Rate limiting, IP lockdowns, User-Agent restrictions.
+
+## Key Features
+
+### 1. Real-Time Event Recording
+- **In-Memory Buffer**: High-speed circular buffer for immediate dashboard access.
+- **Redis Integration**: Short-term persistence and time-series analysis.
+- **Database Archival**: Long-term retention for compliance and auditing.
+
+### 2. Automated Alerting
+- **Threshold Detection**: Triggers alerts when violation counts exceed limits (e.g., 5 failed 2FA attempts/hour).
+- **Pattern Recognition**: Detects "Token Abuse" and "Lockdown Violations".
+- **Severity Levels**: Categorizes events (Info, Warning, Error, Critical).
+
+### 3. Performance Metrics
+- **Operation Latency**: Tracks duration of key family operations.
+- **Success Rates**: Monitors success/failure ratios per user.
+- **Resource Usage**: Database and Redis operation timing.
+
+## Architecture
+
+The `FamilySecurityMonitor` class acts as a singleton service:
+1. **Ingestion**: `record_security_event()` receives raw events.
+2. **Processing**: Events are analyzed for alert conditions (`_check_alert_conditions`).
+3. **Storage**: Data is dispatched to Memory, Redis, and MongoDB.
+4. **Reporting**: `get_security_dashboard_data()` aggregates data for UI.
+
+## Usage Examples
+
+### Recording a Security Event
+
+```python
+await family_security_monitor.record_security_event(
+    event_type="spending_limit_exceeded",
+    user_id="user_123",
+    severity="warning",
+    details={
+        "attempted_amount": 500,
+        "limit": 100,
+        "family_id": "fam_abc"
+    }
+)
+```
+
+### Using the Monitoring Decorator
+
+```python
+@monitor_family_operation("approve_purchase", require_2fa=True)
+async def approve_purchase_request(...):
+    # Function execution is automatically timed and logged
+    ...
+```
+
+## Configuration
+
+- `SECURITY_METRICS_RETENTION_HOURS`: 24 hours (Redis)
+- `AUDIT_LOG_RETENTION_DAYS`: 90 days (MongoDB)
+- `ALERT_THRESHOLD_VIOLATIONS_PER_HOUR`: 10 events
+
+## Module Attributes
+
+Attributes:
+    family_security_monitor (FamilySecurityMonitor): Singleton instance
 """
 
 import asyncio

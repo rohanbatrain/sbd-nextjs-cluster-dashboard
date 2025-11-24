@@ -1,8 +1,29 @@
 """
-IPAM route utility functions.
+# IPAM Utilities
 
-Helper functions for IPAM route handlers including response formatting,
-error handling, and common operations.
+This module provides **helper functions** for the IPAM API.
+It handles response formatting, error standardization, and common validation logic.
+
+## Key Features
+
+### 1. Response Formatting
+- **Standardization**: Ensures consistent JSON structure across all endpoints.
+- **Enrichment**: Adds calculated fields (e.g., `utilization_percentage`) to raw DB objects.
+- **Sanitization**: Removes internal fields or sensitive data before sending to client.
+
+### 2. Validation & Error Handling
+- **Pagination**: Validates and normalizes page/limit parameters.
+- **Errors**: Formats exceptions into standard error responses with codes and timestamps.
+
+## Usage Example
+
+```python
+# Format a raw region object from DB
+response = format_region_response(db_region)
+
+# Validate pagination
+page, size = validate_pagination_params(page_in, size_in)
+```
 """
 
 from typing import Dict, Any, List, Optional

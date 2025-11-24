@@ -17,14 +17,28 @@ logger = get_logger(prefix="[ClubNotifications]")
 
 class ClubNotificationManager:
     """
-    Handles club-specific email notifications using the existing EmailManager.
+    Manages club-specific email notifications using the existing EmailManager.
 
-    Provides notifications for:
-    - Member invitations
-    - Event announcements
-    - Club updates
-    - Role changes
-    - Event reminders
+    Provides comprehensive notification system for club operations including
+    invitations, events, role changes, and reminders.
+
+    **Notification Types:**
+    - **Member invitations**: Personalized invitation emails with accept/decline links
+    - **Event announcements**: Event details with RSVP functionality
+    - **Role changes**: Notifications when member roles are updated
+    - **Event reminders**: Automated reminders before events
+
+    **Email Features:**
+    - HTML-formatted emails with styled templates
+    - Action buttons (Accept, Decline, RSVP)
+    - Event cards with details (date, location, organizer)
+    - Expiration notices for time-sensitive invitations
+
+    **Integration:**
+    - Uses `EmailManager` for actual email delivery
+    - Supports multiple email providers (console, SMTP, SendGrid)
+    - Lazy-loads `ClubManager` to avoid circular imports
+    - Comprehensive error logging for failed deliveries
     """
 
     def __init__(self):
