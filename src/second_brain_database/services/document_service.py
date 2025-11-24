@@ -1,4 +1,50 @@
-"""Document service layer coordinating document processing and vector search."""
+"""
+# Document Service
+
+This module acts as the **Central Orchestrator** for document lifecycle management.
+It coordinates processing, indexing, storage, and retrieval of user documents.
+
+## Domain Overview
+
+Documents are the core knowledge units in the Second Brain.
+- **Processing**: Converting raw files (PDF, DOCX) into structured text and metadata.
+- **Indexing**: Generating vector embeddings for semantic search.
+- **Retrieval**: Finding relevant documents via keyword, semantic, or hybrid search.
+- **Analysis**: Using LLMs to summarize, chat with, and compare documents.
+
+## Key Features
+
+### 1. Document Processing
+- **Docling Integration**: Uses `DocumentProcessor` to extract text, tables, and images.
+- **Multi-Format Support**: Handles various file types seamlessly.
+
+### 2. Vector Search & RAG
+- **Chunking**: Splits documents into semantic chunks for optimal embedding.
+- **Hybrid Search**: Combines keyword matching with vector similarity for best results.
+- **RAG**: Retrieval-Augmented Generation for "Chat with PDF" functionality.
+
+### 3. LLM Analysis
+- **Summarization**: Generates concise summaries of long documents.
+- **Comparison**: Analyzes similarities and differences between two documents.
+
+## Usage Example
+
+```python
+# Upload and process a new document
+result = await document_service.process_and_index_document(
+    file_data=pdf_bytes,
+    filename="research_paper.pdf",
+    user_id="user_123"
+)
+
+# Search for concepts
+results = await document_service.search_documents(
+    query="quantum entanglement",
+    user_id="user_123",
+    search_type="hybrid"
+)
+```
+"""
 
 import asyncio
 from datetime import datetime, timezone
@@ -13,7 +59,19 @@ logger = get_logger(prefix="[DocumentService]")
 
 
 class DocumentService:
-    """Service layer coordinating document processing and vector search operations."""
+    """
+    Service layer coordinating document processing, indexing, and vector search.
+
+    Acts as the central orchestrator for document lifecycle management, integrating
+    Docling for processing and Qdrant/LlamaIndex for vector search.
+
+    **Key Responsibilities:**
+    - **Processing**: Converts raw files (PDF, DOCX, etc.) into structured content.
+    - **Indexing**: Chunks content and generates vector embeddings for search.
+    - **Search**: Performs semantic, keyword, and hybrid search operations.
+    - **Analysis**: Uses LLMs to summarize, analyze, and compare documents.
+    - **Retrieval**: Fetches document content and metadata.
+    """
 
     def __init__(self):
         """Initialize document service with processors and managers."""
@@ -32,18 +90,40 @@ class DocumentService:
         index_for_search: bool = True,
         tenant_id: str = None,
     ) -> Dict[str, Any]:
-        """Process document and optionally index for vector search.
+    async def process_and_index_document(
+        self,
+        file_data: bytes,
+        filename: str,
+        user_id: str,
+        extract_images: bool = None,
+        output_format: str = None,
+        index_for_search: bool = True,
+        tenant_id: str = None,
+    ) -> Dict[str, Any]:
+        """
+        Process a raw document and optionally index it for vector search.
+
+        **Workflow:**
+        1.  **Process**: Uses `DocumentProcessor` (Docling) to extract text, tables, and metadata.
+        2.  **Store**: Saves the processed content to the database.
+        3.  **Index**: (Optional) Chunks the content and generates embeddings via `VectorSearchManager`.
+        4.  **Update**: Marks the document as indexed in the database.
 
         Args:
-            file_data: Document bytes
-            filename: Original filename
-            user_id: User ID for tracking
-            extract_images: Whether to extract images
-            output_format: Output format
-            index_for_search: Whether to index for vector search
+            file_data: Raw binary content of the file.
+            filename: Original name of the file.
+            user_id: ID of the user uploading the document.
+            extract_images: Whether to extract images from the document (default: None).
+            output_format: Desired output format (e.g., markdown, json).
+            index_for_search: Whether to immediately index for vector search (default: True).
+            tenant_id: Optional Tenant ID for isolation.
 
         Returns:
-            Processing result with extracted content and indexing info
+            A dictionary containing the processing result, including `document_id`,
+            `content`, `metadata`, and indexing statistics.
+
+        Raises:
+            Exception: If processing or indexing fails.
         """
         try:
             # Process document with Docling
@@ -101,12 +181,17 @@ class DocumentService:
     async def _update_document_indexed_status(
         self, document_id: str, indexed: bool, chunk_count: int = 0, tenant_id: str = None
     ):
-        """Update document indexed status in database.
+    async def _update_document_indexed_status(
+        self, document_id: str, indexed: bool, chunk_count: int = 0, tenant_id: str = None
+    ):
+        """
+        Update the indexing status of a document in the database.
 
         Args:
-            document_id: MongoDB document ID
-            indexed: Whether document is indexed
-            chunk_count: Number of chunks created
+            document_id: The MongoDB ID of the document.
+            indexed: Boolean indicating if indexing is complete.
+            chunk_count: Number of vector chunks created (default: 0).
+            tenant_id: Optional Tenant ID.
         """
         try:
             from bson import ObjectId
@@ -130,18 +215,36 @@ class DocumentService:
         search_type: str = "semantic",
         include_metadata: bool = True,
     ) -> List[Dict[str, Any]]:
-        """Search documents using specified search type.
+    async def search_documents(
+        self,
+        query: str,
+        user_id: str,
+        limit: int = None,
+        score_threshold: float = None,
+        search_type: str = "semantic",
+        include_metadata: bool = True,
+    ) -> List[Dict[str, Any]]:
+        """
+        Search across processed documents using the specified strategy.
+
+        **Search Strategies:**
+        - `semantic`: Vector similarity search (finds meaning).
+        - `keyword`: Traditional keyword matching (finds exact terms).
+        - `hybrid`: Combines semantic and keyword scores (best of both).
 
         Args:
-            query: Search query
-            user_id: User ID to filter results
-            limit: Maximum results to return
-            score_threshold: Minimum similarity score
-            search_type: Type of search ('semantic', 'keyword', 'hybrid')
-            include_metadata: Whether to include document metadata
+            query: The search string.
+            user_id: User ID to restrict results to owned documents.
+            limit: Maximum number of results to return.
+            score_threshold: Minimum similarity score (0.0 to 1.0).
+            search_type: Strategy to use (`semantic`, `keyword`, `hybrid`).
+            include_metadata: Whether to include full metadata in results.
 
         Returns:
-            List of search results
+            A list of search results, each containing text, score, and metadata.
+
+        Raises:
+            ValueError: If vector search is disabled or search type is invalid.
         """
         if not self.vector_search_manager:
             raise ValueError("Vector search not enabled")
@@ -183,15 +286,30 @@ class DocumentService:
         filename: Optional[str] = None,
         tenant_id: str = None,
     ) -> List[Dict[str, Any]]:
-        """Extract tables from document.
+    async def extract_tables_from_document(
+        self,
+        document_id: Optional[str] = None,
+        file_data: Optional[bytes] = None,
+        filename: Optional[str] = None,
+        tenant_id: str = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Extract structured tables from a document.
+
+        Can process either an existing stored document (by ID) or a new raw file.
 
         Args:
-            document_id: MongoDB document ID (for stored document)
-            file_data: Document bytes (for new document)
-            filename: Filename (for new document)
+            document_id: ID of an existing processed document.
+            file_data: Raw bytes of a new file.
+            filename: Name of the new file.
+            tenant_id: Optional Tenant ID.
 
         Returns:
-            List of extracted tables
+            A list of extracted tables, where each table is a dictionary
+            containing structure and content.
+
+        Raises:
+            ValueError: If neither `document_id` nor `file_data`/`filename` are provided.
         """
         try:
             if document_id:
@@ -221,13 +339,17 @@ class DocumentService:
             raise
 
     async def get_document_content(self, document_id: str, tenant_id: str = None) -> Optional[Dict[str, Any]]:
-        """Retrieve processed document content.
+    async def get_document_content(self, document_id: str, tenant_id: str = None) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve the full content and metadata of a processed document.
 
         Args:
-            document_id: MongoDB document ID
+            document_id: The MongoDB ID of the document.
+            tenant_id: Optional Tenant ID.
 
         Returns:
-            Document content and metadata, or None if not found
+            A dictionary containing the document content and metadata,
+            or `None` if not found.
         """
         try:
             return await self.document_processor.get_document_content(document_id, tenant_id=tenant_id)
@@ -243,16 +365,32 @@ class DocumentService:
         index_chunks: bool = True,
         tenant_id: str = None,
     ) -> List[Dict[str, Any]]:
-        """Chunk document for RAG applications.
+    async def chunk_document_for_rag(
+        self,
+        document_id: str,
+        chunk_size: int = None,
+        chunk_overlap: int = None,
+        index_chunks: bool = True,
+        tenant_id: str = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Split a document into smaller text chunks for RAG applications.
+
+        Uses intelligent chunking via `VectorSearchManager` if available,
+        otherwise falls back to a simple sliding window approach.
 
         Args:
-            document_id: MongoDB document ID
-            chunk_size: Characters per chunk
-            chunk_overlap: Overlap between chunks
-            index_chunks: Whether to index chunks for vector search
+            document_id: The ID of the document to chunk.
+            chunk_size: Maximum characters per chunk (overrides default).
+            chunk_overlap: Overlap characters between chunks (overrides default).
+            index_chunks: Whether to also index these chunks into the vector store.
+            tenant_id: Optional Tenant ID.
 
         Returns:
-            List of text chunks
+            A list of chunk dictionaries containing text and metadata.
+
+        Raises:
+            ValueError: If the document is not found.
         """
         try:
             # Get document content
@@ -297,15 +435,22 @@ class DocumentService:
     async def _simple_chunk_text(
         self, text: str, chunk_size: int, overlap: int
     ) -> List[Dict[str, Any]]:
-        """Simple text chunking fallback.
+    async def _simple_chunk_text(
+        self, text: str, chunk_size: int, overlap: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Perform simple sliding-window text chunking.
+
+        Used as a fallback when advanced semantic chunking is unavailable.
+        Attempts to respect word boundaries.
 
         Args:
-            text: Text to chunk
-            chunk_size: Characters per chunk
-            overlap: Overlap between chunks
+            text: The full text to chunk.
+            chunk_size: Target characters per chunk.
+            overlap: Number of characters to overlap between chunks.
 
         Returns:
-            List of text chunks
+            A list of chunk dictionaries with start/end indices.
         """
         if isinstance(text, dict):
             text = str(text)
@@ -347,16 +492,26 @@ class DocumentService:
         include_content: bool = False,
         tenant_id: str = None,
     ) -> List[Dict[str, Any]]:
-        """Get list of user's processed documents.
+    async def get_document_list(
+        self,
+        user_id: str,
+        limit: int = 50,
+        offset: int = 0,
+        include_content: bool = False,
+        tenant_id: str = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        List processed documents belonging to a user.
 
         Args:
-            user_id: User ID
-            limit: Maximum documents to return
-            offset: Pagination offset
-            include_content: Whether to include full content
+            user_id: The ID of the user.
+            limit: Maximum number of documents to return (default: 50).
+            offset: Number of documents to skip (pagination).
+            include_content: Whether to include the full document text (default: False).
+            tenant_id: Optional Tenant ID.
 
         Returns:
-            List of document summaries
+            A list of document summaries (or full content if requested).
         """
         try:
             from ..database import db_manager
@@ -408,17 +563,30 @@ class DocumentService:
         use_llm: bool = True,
         tenant_id: str = None,
     ) -> Dict[str, Any]:
-        """Query documents using RAG.
+    async def query_document(
+        self,
+        query: str,
+        document_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        top_k: int = 5,
+        use_llm: bool = True,
+        tenant_id: str = None,
+    ) -> Dict[str, Any]:
+        """
+        Query a specific document or all documents using RAG.
+
+        Delegates to `RAGService.query_document`.
 
         Args:
-            query: User query
-            document_id: Optional document ID to search within
-            user_id: User ID for scoping
-            top_k: Number of results
-            use_llm: Use LLM for answer generation
+            query: The user's question.
+            document_id: Optional ID to restrict search to one document.
+            user_id: User ID for scoping.
+            top_k: Number of chunks to retrieve.
+            use_llm: Whether to generate an answer.
+            tenant_id: Optional Tenant ID.
 
         Returns:
-            Query result with answer and sources
+            The query result from `RAGService`.
         """
         from ..services.rag_service import rag_service
 
@@ -439,16 +607,28 @@ class DocumentService:
         stream: bool = False,
         tenant_id: str = None,
     ) -> Dict[str, Any]:
-        """Multi-turn chat with document context.
+    async def chat_with_documents(
+        self,
+        messages: List[Dict[str, str]],
+        document_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        stream: bool = False,
+        tenant_id: str = None,
+    ) -> Dict[str, Any]:
+        """
+        Conduct a multi-turn chat with document context.
+
+        Delegates to `RAGService.chat_with_documents`.
 
         Args:
-            messages: Conversation history
-            document_id: Optional document ID
-            user_id: User ID
-            stream: Enable streaming
+            messages: Conversation history.
+            document_id: Optional document ID.
+            user_id: User ID.
+            stream: Whether to stream the response.
+            tenant_id: Optional Tenant ID.
 
         Returns:
-            Chat response
+            The chat response or stream generator.
         """
         from ..services.rag_service import rag_service
 
@@ -466,14 +646,24 @@ class DocumentService:
         analysis_type: str = "summary",
         tenant_id: str = None,
     ) -> Dict[str, Any]:
-        """Analyze document using LLM.
+    async def analyze_document_with_llm(
+        self,
+        document_id: str,
+        analysis_type: str = "summary",
+        tenant_id: str = None,
+    ) -> Dict[str, Any]:
+        """
+        Analyze a document using LLM capabilities.
+
+        Delegates to `RAGService.analyze_document_with_llm`.
 
         Args:
-            document_id: Document ID
-            analysis_type: Type of analysis (summary, insights, key_points)
+            document_id: The ID of the document.
+            analysis_type: Type of analysis (`summary`, `insights`, `key_points`).
+            tenant_id: Optional Tenant ID.
 
         Returns:
-            Analysis result
+            The analysis result.
         """
         from ..services.rag_service import rag_service
 
@@ -489,14 +679,24 @@ class DocumentService:
         max_length: int = 300,
         tenant_id: str = None,
     ) -> Dict[str, Any]:
-        """Generate document summary using LLM.
+    async def summarize_with_llm(
+        self,
+        document_id: str,
+        max_length: int = 300,
+        tenant_id: str = None,
+    ) -> Dict[str, Any]:
+        """
+        Generate a concise summary of a document.
+
+        A convenience wrapper around `analyze_document_with_llm` with type="summary".
 
         Args:
-            document_id: Document ID
-            max_length: Maximum summary length in words
+            document_id: The ID of the document.
+            max_length: (Unused currently) Target length of summary.
+            tenant_id: Optional Tenant ID.
 
         Returns:
-            Summary result
+            The summary result.
         """
         return await self.analyze_document_with_llm(
             document_id=document_id,
@@ -510,14 +710,28 @@ class DocumentService:
         document_id_2: str,
         tenant_id: str = None,
     ) -> Dict[str, Any]:
-        """Compare two documents using LLM analysis.
+    async def compare_documents_with_llm(
+        self,
+        document_id_1: str,
+        document_id_2: str,
+        tenant_id: str = None,
+    ) -> Dict[str, Any]:
+        """
+        Compare two documents using LLM analysis.
+
+        Retrieves the content of both documents and prompts the LLM to identify
+        similarities, differences, and unique aspects.
 
         Args:
-            document_id_1: First document ID
-            document_id_2: Second document ID
+            document_id_1: ID of the first document.
+            document_id_2: ID of the second document.
+            tenant_id: Optional Tenant ID.
 
         Returns:
-            Comparison analysis
+            A dictionary containing metadata for both documents and the comparison analysis.
+
+        Raises:
+            ValueError: If either document is not found.
         """
         from ..database import db_manager
         from ..managers.ollama_manager import ollama_manager

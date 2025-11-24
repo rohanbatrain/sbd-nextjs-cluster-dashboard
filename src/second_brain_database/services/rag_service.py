@@ -1,14 +1,41 @@
-"""RAG (Retrieval Augmented Generation) Service.
+"""
+# RAG Service (Retrieval-Augmented Generation)
 
-This module provides RAG capabilities combining vector search with LLM generation
-for intelligent document querying, chat, and analysis.
+This module powers the **AI Knowledge Engine** of the Second Brain.
+It combines vector search with LLMs to answer questions based on your documents.
 
-Features:
-- Semantic search with vector similarity
-- LLM-powered question answering
-- Multi-turn conversation with context
-- Document analysis and summarization
-- Source citation and attribution
+## Domain Overview
+
+Standard LLMs hallucinate. RAG grounds them in your actual data.
+- **Retrieval**: Finding relevant text chunks using semantic vector search.
+- **Augmentation**: Injecting those chunks into the LLM's context window.
+- **Generation**: Producing a natural language answer based *only* on the retrieved context.
+
+## Key Features
+
+### 1. Intelligent Querying
+- **Hybrid Search**: Combines keyword and semantic search for high recall and precision.
+- **Source Attribution**: Cites specific documents and relevance scores for every answer.
+
+### 2. Conversational AI
+- **Chat Mode**: Maintains history for follow-up questions ("Tell me more about that").
+- **Context Management**: Dynamically manages token limits to fit the most relevant info.
+
+### 3. Document Analysis
+- **Summarization**: Condenses long documents into executive summaries.
+- **Insight Extraction**: Pulls out action items, dates, and key entities.
+
+## Usage Example
+
+```python
+# Ask a question about your documents
+result = await rag_service.query_document(
+    query="What were the Q3 financial results?",
+    user_id="user_123"
+)
+print(result["answer"])
+# "Based on the Q3 report, revenue increased by 15%..."
+```
 """
 
 from datetime import datetime, timezone
@@ -24,15 +51,22 @@ logger = get_logger(prefix="[RAGService]")
 
 
 class RAGService:
-    """Service for RAG operations.
+    """
+    Service for Retrieval Augmented Generation (RAG) operations.
 
-    This service combines vector search with LLM generation to provide
-    intelligent document querying and analysis capabilities.
+    Combines vector similarity search with Large Language Model (LLM) generation
+    to provide intelligent document querying, analysis, and conversational capabilities.
+
+    **Key Features:**
+    - **Semantic Search**: Retrieves relevant content chunks using vector embeddings.
+    - **Contextual Generation**: Synthesizes answers based on retrieved context.
+    - **Multi-turn Chat**: Maintains conversation history with document context.
+    - **Document Analysis**: Summarization and insight extraction.
 
     Attributes:
-        top_k: Number of top similar chunks to retrieve
-        similarity_threshold: Minimum similarity score
-        max_context_length: Maximum context length in chars
+        top_k (int): Default number of top similar chunks to retrieve (default: 5).
+        similarity_threshold (float): Minimum similarity score for relevance (default: 0.7).
+        max_context_length (int): Maximum context length in characters to prevent token overflow (default: 8000).
     """
 
     def __init__(self):
@@ -60,22 +94,49 @@ class RAGService:
         temperature: float = 0.7,
         tenant_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Query documents using RAG.
+    async def query_document(
+        self,
+        query: str,
+        document_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        top_k: Optional[int] = None,
+        use_llm: bool = True,
+        model: Optional[str] = None,
+        temperature: float = 0.7,
+        tenant_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Query documents using RAG (Retrieval Augmented Generation).
+
+        Retrieves relevant document chunks based on semantic similarity to the query
+        and optionally generates a natural language answer using an LLM.
+
+        **Process:**
+        1.  **Search**: Performs vector search to find relevant chunks.
+        2.  **Filter**: Applies `document_id` and `user_id` filters.
+        3.  **Context**: Constructs a context window from the top results.
+        4.  **Generate**: (Optional) Uses LLM to answer the query based on context.
 
         Args:
-            query: User query
-            document_id: Optional document ID to search within
-            user_id: Optional user ID for scoping
-            top_k: Number of results to retrieve
-            use_llm: Use LLM for answer generation
-            model: LLM model to use
-            temperature: LLM temperature
+            query: The user's question or search query.
+            document_id: Optional ID to restrict search to a specific document.
+            user_id: Optional User ID for permission scoping.
+            top_k: Number of chunks to retrieve (overrides default).
+            use_llm: Whether to generate a natural language answer (default: True).
+            model: Specific LLM model to use (optional).
+            temperature: LLM creativity parameter (0.0 to 1.0).
+            tenant_id: Optional Tenant ID for multi-tenant isolation.
 
         Returns:
-            Query result with answer and sources
+            A dictionary containing:
+            - `query`: The original query.
+            - `answer`: The generated answer (if `use_llm` is True).
+            - `chunks`: List of retrieved content chunks with scores.
+            - `sources`: List of unique source documents.
+            - `chunk_count`: Number of chunks used.
 
         Raises:
-            Exception: If query fails
+            Exception: If vector search or LLM generation fails.
         """
         top_k = top_k or self.top_k
 
@@ -179,21 +240,43 @@ class RAGService:
         stream: bool = False,
         tenant_id: Optional[str] = None,
     ) -> Dict[str, Any] | AsyncGenerator[str, None]:
-        """Multi-turn chat with document context.
+    async def chat_with_documents(
+        self,
+        messages: List[Dict[str, str]],
+        document_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        model: Optional[str] = None,
+        temperature: float = 0.7,
+        stream: bool = False,
+        tenant_id: Optional[str] = None,
+    ) -> Dict[str, Any] | AsyncGenerator[str, None]:
+        """
+        Conduct a multi-turn chat conversation with document context.
+
+        Enables users to ask follow-up questions and maintain context across a conversation.
+        Retrieves fresh context for the latest user message and injects it into the system prompt.
+
+        **Features:**
+        - **Context Injection**: Dynamically adds relevant document excerpts to the system prompt.
+        - **History Preservation**: Maintains full conversation history.
+        - **Streaming Support**: Optionally streams the LLM response token-by-token.
 
         Args:
-            messages: Conversation history (list of {role, content})
-            document_id: Optional document ID
-            user_id: Optional user ID
-            model: LLM model
-            temperature: Temperature
-            stream: Enable streaming
+            messages: List of conversation messages (`{"role": "...", "content": "..."}`).
+            document_id: Optional ID to restrict context to a specific document.
+            user_id: Optional User ID for scoping.
+            model: Specific LLM model to use.
+            temperature: LLM creativity parameter.
+            stream: Whether to stream the response (default: False).
+            tenant_id: Optional Tenant ID.
 
         Returns:
-            Chat response or async generator if streaming
+            - If `stream=False`: A dictionary with the full response and source metadata.
+            - If `stream=True`: An async generator yielding response chunks.
 
         Raises:
-            Exception: If chat fails
+            ValueError: If no user messages are present.
+            Exception: If chat generation fails.
         """
         try:
             # Get last user message as query
@@ -281,19 +364,38 @@ class RAGService:
         temperature: float = 0.7,
         tenant_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Analyze document using LLM.
+    async def analyze_document_with_llm(
+        self,
+        document_id: str,
+        analysis_type: str = "summary",
+        model: Optional[str] = None,
+        temperature: float = 0.7,
+        tenant_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Perform high-level analysis on a document using an LLM.
+
+        Supports various analysis modes like summarization, insight extraction,
+        and key point listing. Handles large documents by truncating to fit context limits.
+
+        **Analysis Types:**
+        - `summary`: Comprehensive overview of the document.
+        - `insights`: Extraction of key findings and actionable takeaways.
+        - `key_points`: Bulleted list of critical information.
 
         Args:
-            document_id: Document ID
-            analysis_type: Type of analysis (summary, insights, key_points)
-            model: LLM model
-            temperature: Temperature
+            document_id: The ID of the document to analyze.
+            analysis_type: Type of analysis to perform (default: "summary").
+            model: Specific LLM model to use.
+            temperature: LLM creativity parameter.
+            tenant_id: Optional Tenant ID.
 
         Returns:
-            Analysis result
+            A dictionary containing the analysis result, type, and metadata.
 
         Raises:
-            Exception: If analysis fails
+            ValueError: If the document is not found.
+            Exception: If LLM generation fails.
         """
         try:
             # Get document content
@@ -362,13 +464,18 @@ class RAGService:
             raise
 
     def _build_context(self, chunks: List[Dict[str, Any]]) -> str:
-        """Build context string from chunks.
+    def _build_context(self, chunks: List[Dict[str, Any]]) -> str:
+        """
+        Construct a context string from retrieved content chunks.
+
+        Formats chunks with source attribution and relevance scores.
+        Enforces the `max_context_length` limit to prevent token overflow.
 
         Args:
-            chunks: List of chunk dicts
+            chunks: List of retrieved content chunks (containing `text`, `score`, etc.).
 
         Returns:
-            Context string
+            A formatted string containing the aggregated context.
         """
         if not chunks:
             return ""
@@ -399,19 +506,30 @@ class RAGService:
         model: Optional[str] = None,
         temperature: float = 0.7,
     ) -> str:
-        """Generate answer using LLM.
+    async def _generate_answer(
+        self,
+        query: str,
+        context: str,
+        model: Optional[str] = None,
+        temperature: float = 0.7,
+    ) -> str:
+        """
+        Generate a natural language answer using the LLM.
+
+        Constructs a prompt combining the user's query and the retrieved context.
+        Instructs the model to rely solely on the provided context.
 
         Args:
-            query: User query
-            context: Context from retrieved chunks
-            model: LLM model
-            temperature: Temperature
+            query: The user's question.
+            context: The constructed context string from retrieved chunks.
+            model: Specific LLM model to use.
+            temperature: LLM creativity parameter.
 
         Returns:
-            Generated answer
+            The generated answer string.
 
         Raises:
-            Exception: If generation fails
+            Exception: If the LLM call fails.
         """
         prompt = f"""Based on the following context, please answer the question. If the context doesn't contain enough information to answer the question, say so clearly.
 

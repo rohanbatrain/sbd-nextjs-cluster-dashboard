@@ -1,5 +1,35 @@
 """
-Service for calculating Spaced Repetition (SM-2) intervals.
+# Spaced Repetition Service
+
+This module implements the **SM-2 Algorithm** for optimal memory retention.
+It calculates the ideal time to review information to maximize long-term recall.
+
+## Domain Overview
+
+The "Forgetting Curve" dictates that memories fade over time.
+- **Spaced Repetition**: Reviewing items at increasing intervals just before you forget them.
+- **SM-2**: The classic algorithm used by Anki and SuperMemo.
+
+## Key Features
+
+### 1. Interval Calculation
+- **Input**: User rating (0-5), current interval, ease factor, repetition count.
+- **Output**: Next review date, new interval, new ease factor.
+
+### 2. Adaptive Scheduling
+- **Ease Factor**: Adjusts the multiplier based on how easy/hard the item was.
+- **Reset**: Forgetting an item resets its interval to 1 day to re-encode it.
+
+## Usage Example
+
+```python
+next_date, interval, ease, reps = calculate_next_review(
+    rating=4,              # "Good"
+    current_interval=3,    # Last reviewed 3 days ago
+    current_ease=2.5,
+    current_repetition=2
+)
+```
 """
 
 from datetime import datetime, timedelta
@@ -12,21 +42,37 @@ def calculate_next_review(
     current_repetition: int
 ) -> Tuple[datetime, int, float, int]:
     """
-    Calculates the next review date, interval, ease factor, and repetition count
-    based on the SM-2 algorithm.
+    Calculate the next review parameters using the SM-2 Spaced Repetition algorithm.
+
+    Implements the SuperMemo-2 algorithm for optimizing memory retention through
+    spaced intervals. Adjusts review intervals based on user performance ratings.
+
+    **Algorithm Summary:**
+    - **Forgot (rating < 3)**: Reset interval to 1 day, restart repetition count.
+    - **Remembered (rating >= 3)**: Increase interval based on ease factor and repetition count.
+    - **Ease Factor**: Dynamically adjusted using the SM-2 formula, with a minimum of 1.3.
+
+    **Interval Progression:**
+    - First repetition: 1 day
+    - Second repetition: 6 days
+    - Subsequent: `previous_interval * ease_factor`
 
     Args:
-        rating: User rating (0-5). 0-2: Forgot, 3: Hard, 4: Good, 5: Easy.
+        rating: User's self-assessment (0-5).
+            - **0-2**: Forgot (reset interval)
+            - **3**: Hard (small ease decrease)
+            - **4**: Good (stable)
+            - **5**: Easy (ease increase)
         current_interval: Current interval in days.
-        current_ease: Current ease factor.
-        current_repetition: Current repetition count.
+        current_ease: Current ease factor (typically starts at 2.5).
+        current_repetition: Number of successful repetitions.
 
     Returns:
-        Tuple containing:
-        - next_review_date (datetime)
-        - new_interval (int)
-        - new_ease_factor (float)
-        - new_repetition_count (int)
+        A tuple containing:
+        - `next_review_date`: When the card should be reviewed next.
+        - `new_interval`: Updated interval in days.
+        - `new_ease_factor`: Updated ease factor (minimum 1.3).
+        - `new_repetition_count`: Updated repetition count.
     """
     
     if rating < 3:
