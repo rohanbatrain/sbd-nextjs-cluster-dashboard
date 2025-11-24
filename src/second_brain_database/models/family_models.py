@@ -23,7 +23,7 @@ The family domain is built around the following key entities:
 - **Type Validation**: Only specific relationship types are allowed (defined in `RELATIONSHIP_TYPES`).
 
 ### 2. Financials
-- **Non-Negative Values**: Token amounts and costs must be positive integers.
+- **Non-Negative Values**: Token amounts and costs must be positive decimals (up to 2 decimal places).
 - **Spending Limits**: Can be set to specific amounts or -1 for unlimited.
 
 ### 3. Identifiers
@@ -65,9 +65,12 @@ Attributes:
 """
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
+
+from second_brain_database.utils.decimal_helpers import validate_sbd_amount
 
 # Constants for validation
 RELATIONSHIP_TYPES = {
@@ -214,7 +217,7 @@ class UpdateSpendingPermissionsRequest(BaseModel):
     """
 
     user_id: str = Field(..., description="ID of the user to update permissions for")
-    spending_limit: int = Field(..., ge=-1, description="Spending limit (-1 for unlimited)")
+    spending_limit: Decimal = Field(..., ge=-1, description="Spending limit in SBD tokens (-1 for unlimited)")
     can_spend: bool = Field(..., description="Whether the user can spend from family account")
 
     @field_validator("spending_limit")
@@ -258,7 +261,7 @@ class CreateTokenRequestRequest(BaseModel):
     *   **reason**: Required, min 5 chars.
     """
 
-    amount: int = Field(..., gt=0, description="Amount of tokens requested")
+    amount: Decimal = Field(..., gt=0, description="Amount of tokens requested (up to 2 decimal places)")
     reason: str = Field(..., max_length=500, description="Reason for the token request")
 
     @field_validator("reason")
@@ -270,6 +273,15 @@ class CreateTokenRequestRequest(BaseModel):
         if len(v) < 5:
             raise ValueError("Reason must be at least 5 characters long")
         return v
+
+    @field_validator("amount")
+    @classmethod
+    def validate_amount(cls, v):
+        """Ensure amount is positive and has at most 2 decimal places."""
+        validated = validate_sbd_amount(v)
+        if validated <= 0:
+            raise ValueError("Transaction amount must be positive")
+        return validated
 
 
 class ReviewTokenRequestRequest(BaseModel):
@@ -412,7 +424,7 @@ class MemberPermissionsResponse(BaseModel):
     """
 
     role: str
-    spending_limit: int
+    spending_limit: Decimal
     can_spend: bool
     updated_by: str
     updated_at: datetime
@@ -428,7 +440,7 @@ class SBDAccountResponse(BaseModel):
     """
 
     account_username: str
-    balance: int
+    balance: Decimal
     is_frozen: bool
     frozen_by: Optional[str] = None
     frozen_at: Optional[datetime] = None
@@ -448,7 +460,7 @@ class FamilySettingsResponse(BaseModel):
 
     allow_member_invites: bool
     visibility: str
-    auto_approval_threshold: int
+    auto_approval_threshold: Decimal
     request_expiry_hours: int
 
 
@@ -553,7 +565,7 @@ class TokenRequestResponse(BaseModel):
     family_id: str
     requester_user_id: str
     requester_username: str
-    amount: int
+    amount: Decimal
     reason: str
     status: str
     reviewed_by: Optional[str] = None
@@ -958,7 +970,7 @@ class FamilyTokenRequestDocument(BaseModel):
     request_id: str
     family_id: str
     requester_user_id: str
-    amount: int
+    amount: Decimal
     reason: str
     status: str
     reviewed_by: Optional[str] = None
@@ -972,9 +984,11 @@ class FamilyTokenRequestDocument(BaseModel):
     @field_validator("amount")
     @classmethod
     def validate_amount(cls, v):
-        if v <= 0:
+        """Ensure amount is positive and has at most 2 decimal places."""
+        validated = validate_sbd_amount(v)
+        if validated <= 0:
             raise ValueError("Amount must be positive")
-        return v
+        return validated
 
     @field_validator("status")
     @classmethod
