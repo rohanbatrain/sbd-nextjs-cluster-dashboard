@@ -161,12 +161,13 @@ def get_shop_items_seed_data():
     """
     shop_items = []
 
-    # Themes
+    # Themes (₹29 each = 29,000,000 SBD)
     shop_items.extend([
         {
             "item_id": "emotion_tracker-serenityGreen",
             "name": "Serenity Green Theme",
-            "price": 250,
+            "price": 29000000,
+            "price_inr": 29,
             "item_type": "theme",
             "category": "light",
             "featured": True,
@@ -175,7 +176,8 @@ def get_shop_items_seed_data():
         {
             "item_id": "emotion_tracker-pacificBlue",
             "name": "Pacific Blue Theme",
-            "price": 250,
+            "price": 29000000,
+            "price_inr": 29,
             "item_type": "theme",
             "category": "light",
             "description": "Ocean-inspired blue theme for clarity and focus",
@@ -183,7 +185,8 @@ def get_shop_items_seed_data():
         {
             "item_id": "emotion_tracker-midnightLavender",
             "name": "Midnight Lavender Theme",
-            "price": 250,
+            "price": 29000000,
+            "price_inr": 29,
             "item_type": "theme",
             "category": "dark",
             "featured": True,
@@ -192,7 +195,8 @@ def get_shop_items_seed_data():
         {
             "item_id": "emotion_tracker-crimsonRedDark",
             "name": "Crimson Red Dark Theme",
-            "price": 250,
+            "price": 29000000,
+            "price_inr": 29,
             "item_type": "theme",
             "category": "dark",
             "description": "Bold dark theme with crimson highlights",
@@ -204,7 +208,8 @@ def get_shop_items_seed_data():
         {
             "item_id": "emotion_tracker-animated-avatar-playful_eye",
             "name": "Playful Eye Avatar",
-            "price": 2500,
+            "price": 49000000,  # ₹49
+            "price_inr": 49,
             "item_type": "avatar",
             "category": "animated",
             "featured": True,
@@ -214,7 +219,8 @@ def get_shop_items_seed_data():
         {
             "item_id": "emotion_tracker-animated-avatar-floating_brain",
             "name": "Floating Brain Avatar",
-            "price": 5000,
+            "price": 49000000,  # ₹49
+            "price_inr": 49,
             "item_type": "avatar",
             "category": "animated",
             "featured": True,
@@ -223,7 +229,8 @@ def get_shop_items_seed_data():
         {
             "item_id": "emotion_tracker-static-avatar-cat-1",
             "name": "Cat Avatar 1",
-            "price": 100,
+            "price": 5000000,  # ₹5
+            "price_inr": 5,
             "item_type": "avatar",
             "category": "cats",
             "description": "Cute static cat avatar",
@@ -231,83 +238,91 @@ def get_shop_items_seed_data():
         {
             "item_id": "emotion_tracker-static-avatar-dog-1",
             "name": "Dog Avatar 1",
-            "price": 100,
+            "price": 5000000,  # ₹5
+            "price_inr": 5,
             "item_type": "avatar",
             "category": "dogs",
             "description": "Friendly static dog avatar",
         },
     ])
 
-    # Banners
+    # Banners (₹19 each = 19,000,000 SBD)
     shop_items.extend([
         {
             "item_id": "emotion_tracker-static-banner-earth-1",
             "name": "Earth Banner",
-            "price": 100,
+            "price": 19000000,
+            "price_inr": 19,
             "item_type": "banner",
             "category": "nature",
             "description": "Beautiful Earth landscape banner",
         }
     ])
 
-    # Bundles
+    # Bundles (Value packs with 15-20% discount)
     shop_items.extend([
         {
             "item_id": "emotion_tracker-avatars-cat-bundle",
             "name": "Cat Lovers Pack",
-            "price": 2000,
+            "price": 129000000,  # ₹129 (20 avatars worth ₹100, save ₹71)
+            "price_inr": 129,
             "item_type": "bundle",
             "category": "avatars",
             "featured": True,
-            "description": "Complete collection of cat avatars",
+            "description": "Complete collection of 20 cat avatars - Save 55%!",
             "bundle_contents": BUNDLE_CONTENTS.get("emotion_tracker-avatars-cat-bundle", {}),
         },
         {
             "item_id": "emotion_tracker-themes-dark",
             "name": "Dark Theme Pack",
-            "price": 2500,
+            "price": 119000000,  # ₹119 (Multiple dark themes)
+            "price_inr": 119,
             "item_type": "bundle",
             "category": "themes",
             "featured": True,
-            "description": "Collection of premium dark themes",
+            "description": "Collection of premium dark themes - Save 20%!",
             "bundle_contents": BUNDLE_CONTENTS.get("emotion_tracker-themes-dark", {}),
         },
         {
             "item_id": "emotion_tracker-avatars-dog-bundle",
             "name": "Dog Lovers Pack",
-            "price": 2000,
+            "price": 129000000,  # ₹129 (17 avatars worth ₹85, save ₹56)
+            "price_inr": 129,
             "item_type": "bundle",
             "category": "avatars",
             "featured": True,
-            "description": "Complete collection of dog avatars",
+            "description": "Complete collection of 17 dog avatars - Save 50%!",
             "bundle_contents": BUNDLE_CONTENTS.get("emotion_tracker-avatars-dog-bundle", {}),
         },
         {
             "item_id": "emotion_tracker-avatars-panda-bundle",
             "name": "Panda Lovers Pack",
-            "price": 1500,
+            "price": 99000000,  # ₹99 (10 avatars worth ₹50, save ₹51)
+            "price_inr": 99,
             "item_type": "bundle",
             "category": "avatars",
-            "description": "Adorable panda avatar collection",
+            "description": "Adorable panda avatar collection - Save 50%!",
             "bundle_contents": BUNDLE_CONTENTS.get("emotion_tracker-avatars-panda-bundle", {}),
         },
         {
             "item_id": "emotion_tracker-avatars-people-bundle",
             "name": "People Pack",
-            "price": 2000,
+            "price": 129000000,  # ₹129
+            "price_inr": 129,
             "item_type": "bundle",
             "category": "avatars",
-            "description": "Human character avatar collection",
+            "description": "Human character avatar collection - Great value!",
             "bundle_contents": BUNDLE_CONTENTS.get("emotion_tracker-avatars-people-bundle", {}),
         },
         {
             "item_id": "emotion_tracker-themes-light",
             "name": "Light Theme Pack",
-            "price": 2500,
+            "price": 119000000,  # ₹119
+            "price_inr": 119,
             "item_type": "bundle",
             "category": "themes",
             "featured": True,
-            "description": "Collection of premium light themes",
+            "description": "Collection of premium light themes - Save 20%!",
             "bundle_contents": BUNDLE_CONTENTS.get("emotion_tracker-themes-light", {}),
         },
     ])
