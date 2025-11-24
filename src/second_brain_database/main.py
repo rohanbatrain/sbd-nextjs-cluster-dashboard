@@ -356,6 +356,8 @@ from second_brain_database.routes.family.routes import router as family_router
 from second_brain_database.routes.profile.routes import router as profile_router
 from second_brain_database.routes.sbd_tokens.routes import router as sbd_tokens_router
 from second_brain_database.routes.shop.routes import router as shop_router
+from second_brain_database.routes.subscriptions import router as subscriptions_router
+from second_brain_database.routes.wallet import router as wallet_router
 from second_brain_database.routes.themes.routes import router as themes_router
 from second_brain_database.routes.websockets import router as websockets_router
 from second_brain_database.routes.workspaces.routes import router as workspaces_router
@@ -1542,6 +1544,8 @@ routers_config = [
     ("sbd_tokens", sbd_tokens_router, "SBD tokens management endpoints"),
     ("themes", themes_router, "Theme management endpoints"),
     ("shop", shop_router, "Shop and purchase management endpoints"),
+    ("subscriptions", subscriptions_router, "Subscription management endpoints"),
+    ("wallet", wallet_router, "Wallet enhancements: recurring debits, notifications, analytics"),
     ("avatars", avatars_router, "Avatar management endpoints"),
     ("banners", banners_router, "Banner management endpoints"),
     ("profile", profile_router, "User profile management endpoints"),

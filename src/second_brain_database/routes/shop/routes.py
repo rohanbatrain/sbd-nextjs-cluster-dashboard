@@ -100,6 +100,7 @@ from second_brain_database.managers.family_manager import family_manager
 from second_brain_database.managers.logging_manager import get_logger
 from second_brain_database.managers.security_manager import security_manager
 from second_brain_database.routes.auth import enforce_all_lockdowns
+from second_brain_database.services.subscription_service import SubscriptionService
 from second_brain_database.utils.logging_utils import (
     ip_address_context,
     log_database_operation,
@@ -771,6 +772,26 @@ async def get_item_details(item_id: str, item_type: str):
             "type": "banner"  # Legacy compatibility
         }
     return None
+
+
+async def check_subscription_access(user_id: str, app_id: str = "emotion_tracker") -> bool:
+    """
+    Check if user has an active subscription that grants access to all items.
+    
+    Args:
+        user_id: User ID
+        app_id: App ID (defaults to "emotion_tracker")
+    
+    Returns:
+        bool: True if user has active subscription, False otherwise
+    """
+    try:
+        subscription_service = SubscriptionService()
+        subscription = await subscription_service.check_active_subscription(user_id, app_id)
+        return subscription is not None
+    except Exception as e:
+        logger.warning("Failed to check subscription status for user %s: %s", user_id, e)
+        return False
 
 
 # Utility to get or create a user's shop doc
@@ -1772,29 +1793,36 @@ async def get_customer_analytics(current_user: dict = Depends(enforce_all_lockdo
 
 
 
-@router.get("/shop/inventory", response_model=InventoryResponse)
+@router.get("/shop/inventory")
 async def get_inventory(current_user: dict = Depends(enforce_all_lockdowns)):
     """
     Retrieve the user's complete inventory of owned items.
 
     Includes all purchased themes, avatars, banners, and bundles.
+    Also includes subscription status for premium access.
     This data is used to populate the "My Stuff" or "Inventory" section of the shop.
 
     Args:
         current_user (dict): The authenticated user.
 
     Returns:
-        InventoryResponse: A structured list of all owned items.
+        Dict: A structured list of all owned items plus subscription status.
     """
     users_collection = db_manager.get_collection("users")
     user = await users_collection.find_one({"username": current_user["username"]})
+    user_id = str(current_user["_id"])
+    
+    # Check subscription status
+    has_subscription = await check_subscription_access(user_id, "emotion_tracker")
     
     return {
         "themes": user.get("themes_owned", []),
         "avatars": user.get("avatars_owned", []),
         "banners": user.get("banners_owned", []),
         "bundles": user.get("bundles_owned", []),
-        "total_items": len(user.get("themes_owned", [])) + len(user.get("avatars_owned", [])) + len(user.get("banners_owned", []))
+        "total_items": len(user.get("themes_owned", [])) + len(user.get("avatars_owned", [])) + len(user.get("banners_owned", [])),
+        "has_subscription": has_subscription,
+        "subscription_app": "emotion_tracker" if has_subscription else None
     }
 
 
@@ -2091,6 +2119,47 @@ async def buy_theme(
         if not user:
             logger.warning("[%s] POST /shop/themes/buy user not found - User: %s", request_id, username)
             return JSONResponse({"status": "error", "detail": "User not found"}, status_code=404)
+
+        # Check if user has active subscription (grants access to all items)
+        has_subscription = await check_subscription_access(user_id, "emotion_tracker")
+        
+        if has_subscription:
+            # User has subscription - grant access without purchase
+            logger.info(
+                "[%s] POST /shop/themes/buy subscription access granted - User: %s, Theme: %s",
+                request_id,
+                username,
+                theme_id,
+            )
+            
+            # Add theme to owned items if not already present
+            theme_already_owned = any(owned["theme_id"] == theme_id for owned in user.get("themes_owned", []))
+            
+            if not theme_already_owned:
+                theme_entry = {
+                    "theme_id": theme_id,
+                    "unlocked_at": datetime.now(timezone.utc).isoformat(),
+                    "permanent": True,
+                    "source": "subscription",
+                    "note": "Unlocked via Emotion Tracker Premium subscription",
+                }
+                
+                await users_collection.update_one(
+                    {"username": username},
+                    {"$push": {"themes_owned": theme_entry}}
+                )
+            
+            return JSONResponse({
+                "status": "success",
+                "theme": {
+                    "theme_id": theme_id,
+                    "unlocked_at": datetime.now(timezone.utc).isoformat(),
+                    "permanent": True,
+                    "source": "subscription",
+                    "note": "Unlocked via subscription",
+                },
+                "subscription_access": True
+            })
 
         # Check ownership
         for owned in user.get("themes_owned", []):

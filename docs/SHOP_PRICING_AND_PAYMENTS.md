@@ -6,26 +6,27 @@ Complete documentation for the Second Brain Database shop pricing system and Raz
 
 ---
 
-## 📊 Current Pricing (Option A: Budget-Friendly)
+## 📊 Current Pricing (Option A: Budget-Friendly + 5% SBD Discount)
 
 ### Exchange Rate
-- **1 INR = 1,000,000 SBD**
-- **1 SBD = ₹0.000001**
+- **1 INR = 1,000,000 SBD** (Base Rate)
+- **SBD Discount**: All items priced in SBD are **exactly 5% cheaper** than their INR equivalent.
+- **Rounding**: SBD prices are rounded to the nearest clean million or decimal for readability.
 
 ### Price List
 
-| Item Type | INR Price | SBD Price | Savings (Bundles) |
-|-----------|-----------|-----------|-------------------|
-| **Themes** | ₹29 | 29,000,000 SBD | - |
-| **Animated Avatars** | ₹49 | 49,000,000 SBD | - |
-| **Static Avatars** | ₹5 | 5,000,000 SBD | - |
-| **Banners** | ₹19 | 19,000,000 SBD | - |
-| **Cat Lovers Bundle** | ₹129 | 129,000,000 SBD | Save 55% (₹71) |
-| **Dog Lovers Bundle** | ₹129 | 129,000,000 SBD | Save 50% (₹56) |
-| **Panda Bundle** | ₹99 | 99,000,000 SBD | Save 50% (₹51) |
-| **People Bundle** | ₹129 | 129,000,000 SBD | Great value! |
-| **Dark Theme Pack** | ₹119 | 119,000,000 SBD | Save 20% (₹28) |
-| **Light Theme Pack** | ₹119 | 119,000,000 SBD | Save 20% (₹28) |
+| Item Type | INR Price | SBD Price (5% Off) | Savings vs INR |
+|-----------|-----------|-------------------|----------------|
+| **Themes** | ₹30 | 28,500,000 SBD | Save 5% |
+| **Animated Avatars** | ₹50 | 47,500,000 SBD | Save 5% |
+| **Static Avatars** | ₹5 | 4,750,000 SBD | Save 5% |
+| **Banners** | ₹20 | 19,000,000 SBD | Save 5% |
+| **Cat Lovers Bundle** | ₹129 | 122,550,000 SBD | Save 5% + Bundle Discount |
+| **Dog Lovers Bundle** | ₹129 | 122,550,000 SBD | Save 5% + Bundle Discount |
+| **Panda Bundle** | ₹99 | 94,050,000 SBD | Save 5% + Bundle Discount |
+| **People Bundle** | ₹129 | 122,550,000 SBD | Save 5% + Bundle Discount |
+| **Dark Theme Pack** | ₹120 | 114,000,000 SBD | Save 5% + Bundle Discount |
+| **Light Theme Pack** | ₹120 | 114,000,000 SBD | Save 5% + Bundle Discount |
 
 ---
 
