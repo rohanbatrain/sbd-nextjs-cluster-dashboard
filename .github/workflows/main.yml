@@ -1,6 +1,5 @@
-name: Build and Push Docker Latest Image to GHCR
+name: Build and Push Docker Latest Image
 
-# Trigger the action when pushing to the main branch
 on:
   push:
     branches:
@@ -11,31 +10,41 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Checkout the code from the repository
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
-      # Set up Docker Buildx (needed for building Docker images in GitHub Actions)
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Validate docker-compose configuration
+        run: |
+          cp .env.development.example .env
+          cd infra
+          docker-compose -f docker-compose.yml config > /dev/null
+          echo "✓ Docker Compose configuration valid"
 
-      # Login to Docker Hub before building and pushing (good practice)
       - name: Login to Docker Hub
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           username: rohanbatra
           password: ${{ secrets.DOCKER_HUB_TOKEN }}
 
-      # Build and push Docker image to Docker Hub
       - name: Build and Push Docker image (Docker Hub)
         run: |
-          docker build -t rohanbatra/second_brain_database:latest .
+          docker build -f infra/Dockerfile -t rohanbatra/second_brain_database:latest .
           docker push rohanbatra/second_brain_database:latest
   
-      - name: Publish to Github Registry
-        uses: elgohr/Publish-Docker-Github-Action@v5
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
         with:
-          name: rohanbatrain/second_brain_database
+          registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-          registry: ghcr.io
+      
+      - name: Publish to Github Registry
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: infra/Dockerfile
+          push: true
+          tags: ghcr.io/rohanbatrain/second_brain_database:latest

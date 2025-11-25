@@ -1,0 +1,110 @@
+version: '3.8'
+
+# Testing-specific configuration
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.test.yml up
+
+services:
+  # MongoDB - Test Configuration
+  mongo:
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: testuser
+      MONGO_INITDB_ROOT_PASSWORD: testpassword
+      MONGO_INITDB_DATABASE: test_second_brain_database
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+  # Redis - Test Configuration
+  redis:
+    command: redis-server --save "" --appendonly no  # Disable persistence for tests
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+
+  # Qdrant - Test Configuration
+  qdrant:
+    environment:
+      QDRANT__SERVICE__API_KEY: ""
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+  # API - Test Configuration
+  api:
+    environment:
+      - DEBUG=False
+      - LOG_LEVEL=WARNING
+      - ENVIRONMENT=test
+      - UVICORN_WORKERS=1
+      - MONGODB_URL=mongodb://testuser:testpassword@mongo:27017/test_second_brain_database?authSource=admin
+      - MONGODB_DATABASE=test_second_brain_database
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    healthcheck:
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+
+  # Celery Worker - Test Configuration
+  celery-worker:
+    environment:
+      - DEBUG=False
+      - LOG_LEVEL=WARNING
+      - ENVIRONMENT=test
+      - CELERY_LOG_LEVEL=warning
+      - CELERY_WORKER_CONCURRENCY=1
+      - MONGODB_URL=mongodb://testuser:testpassword@mongo:27017/test_second_brain_database?authSource=admin
+      - MONGODB_DATABASE=test_second_brain_database
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+  # Celery Beat - Test Configuration
+  celery-beat:
+    environment:
+      - DEBUG=False
+      - LOG_LEVEL=WARNING
+      - ENVIRONMENT=test
+      - CELERY_LOG_LEVEL=warning
+      - MONGODB_URL=mongodb://testuser:testpassword@mongo:27017/test_second_brain_database?authSource=admin
+      - MONGODB_DATABASE=test_second_brain_database
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+
+# Override network for test isolation
+networks:
+  sbd-network:
+    driver: bridge
+    internal: true  # Isolate test network from external access

@@ -1,6 +1,6 @@
 # Makefile for Second Brain Database development tasks
 
-.PHONY: help lint lint-fix format check test install-dev clean
+.PHONY: help lint lint-fix format check test install-dev clean docker-build docker-up docker-down docker-test docker-logs docker-clean
 
 # Default target
 help:
@@ -16,6 +16,15 @@ help:
 	@echo "  validate-dev  - Validate development environment"
 	@echo "  pre-commit    - Install pre-commit hooks"
 	@echo "  clean         - Clean up temporary files"
+	@echo ""
+	@echo "Docker commands:"
+	@echo "  docker-build  - Build Docker images"
+	@echo "  docker-up     - Start all Docker services (development)"
+	@echo "  docker-down   - Stop all Docker services"
+	@echo "  docker-test   - Run Docker integration tests"
+	@echo "  docker-logs   - View Docker service logs"
+	@echo "  docker-clean  - Clean up Docker resources"
+	@echo "  docker-prod   - Start Docker services (production)"
 
 # Linting commands
 lint:
@@ -108,3 +117,110 @@ lint-dir:
 		echo "🔍 Linting $(DIR)..."; \
 		python scripts/lint.py $(DIR); \
 	fi
+
+# ============================================================================
+# DOCKER COMMANDS
+# ============================================================================
+
+# Build Docker images
+docker-build:
+	@echo "🐳 Building Docker images..."
+	bash scripts/docker-build.sh
+
+docker-build-no-cache:
+	@echo "🐳 Building Docker images (no cache)..."
+	bash scripts/docker-build.sh --no-cache
+
+# Start Docker services
+docker-up:
+	@echo "🐳 Starting Docker services (development)..."
+	cd infra && docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+	@echo "✅ Services started! API: http://localhost:8000/docs"
+
+docker-up-build:
+	@echo "🐳 Building and starting Docker services..."
+	cd infra && docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+
+# Start with optional services
+docker-up-full:
+	@echo "🐳 Starting all Docker services (including Ollama)..."
+	cd infra && docker-compose -f docker-compose.yml -f docker-compose.dev.yml --profile full up -d
+
+# Production
+docker-prod:
+	@echo "🐳 Starting Docker services (production)..."
+	cd infra && docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+# Stop Docker services
+docker-down:
+	@echo "🐳 Stopping Docker services..."
+	cd infra && docker-compose down
+
+docker-down-volumes:
+	@echo "🐳 Stopping Docker services and removing volumes..."
+	cd infra && docker-compose down -v
+
+# View logs
+docker-logs:
+	@echo "🐳 Viewing Docker logs..."
+	cd infra && docker-compose logs -f
+
+docker-logs-api:
+	@echo "🐳 Viewing API logs..."
+	cd infra && docker-compose logs -f api
+
+docker-logs-celery:
+	@echo "🐳 Viewing Celery worker logs..."
+	cd infra && docker-compose logs -f celery-worker
+
+# Testing
+docker-test:
+	@echo "🐳 Running Docker integration tests..."
+	bash scripts/docker-test.sh
+
+# Service status
+docker-ps:
+	@echo "🐳 Docker service status..."
+	cd infra && docker-compose ps
+
+docker-stats:
+	@echo "🐳 Docker resource usage..."
+	docker stats --no-stream
+
+# Cleanup
+docker-clean:
+	@echo "🐳 Cleaning up Docker resources..."
+	cd infra && docker-compose down -v --remove-orphans
+	docker system prune -f
+
+docker-clean-all:
+	@echo "🐳 Cleaning up all Docker resources (WARNING: removes everything)..."
+	cd infra && docker-compose down -v --remove-orphans
+	docker system prune -a -f --volumes
+
+# Execute commands in containers
+docker-shell:
+	@echo "🐳 Opening shell in API container..."
+	cd infra && docker-compose exec api bash
+
+docker-python:
+	@echo "🐳 Opening Python shell in API container..."
+	cd infra && docker-compose exec api python
+
+# Database access
+docker-mongo:
+	@echo "🐳 Connecting to MongoDB..."
+	cd infra && docker-compose exec mongo mongosh -u admin -p devpassword
+
+docker-redis:
+	@echo "🐳 Connecting to Redis..."
+	cd infra && docker-compose exec redis redis-cli
+
+# Restart services
+docker-restart:
+	@echo "🐳 Restarting Docker services..."
+	cd infra && docker-compose restart
+
+docker-restart-api:
+	@echo "🐳 Restarting API service..."
+	cd infra && docker-compose restart api

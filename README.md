@@ -2,6 +2,9 @@
 
 ![banner](https://github.com/user-attachments/assets/85429929-ac86-4a03-8cd7-4e473d4fd402)
 
+[![Docker Dev Test](https://github.com/rohanbatrain/second_brain_database/workflows/Docker%20Dev%20Test/badge.svg)](https://github.com/rohanbatrain/second_brain_database/actions/workflows/docker-test-dev.yml)
+[![Docker Test Suite](https://github.com/rohanbatrain/second_brain_database/workflows/Docker%20Test%20Suite/badge.svg)](https://github.com/rohanbatrain/second_brain_database/actions/workflows/docker-test-test.yml)
+[![Docker Production Build](https://github.com/rohanbatrain/second_brain_database/workflows/Docker%20Production%20Build/badge.svg)](https://github.com/rohanbatrain/second_brain_database/actions/workflows/docker-build-prod.yml)
 
 **A Centralized Approach to Personal Knowledge Management**
 
@@ -28,11 +31,39 @@ Second Brain Database resolves this by using **MongoDB** to store data in a non-
 
 The project incorporates micro frontends to keep things modular and focused. For example, the *Emotion Capture* frontend is designed specifically to capture and store emotions without overwhelming you with other features. These small, focused frontends operate independently, interacting with the centralized MongoDB database via the Flask API.
 
-## � Project Status
+## 📦 Project Status
 
 Second Brain Database is **still under active development**. The core functionality is in place, and a beta release is coming soon. Once the beta is ready, I'll provide more details on how you can try it out and contribute to its development.
 
-Docker Pull
+## 🐳 Docker Quick Start
+
+The easiest way to run Second Brain Database is with Docker Compose:
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/rohanbatrain/second_brain_database.git
+cd second_brain_database
+
+# 2. Copy environment file
+cp .env.development.example .env
+
+# 3. Start all services
+cd infra
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+
+# 4. Access the API
+open http://localhost:8000/docs
+```
+
+**Or use the Makefile:**
+
+```bash
+make docker-up
+```
+
+For comprehensive Docker documentation, see [docs/DOCKER.md](docs/DOCKER.md).
+
+### Docker Pull
 
 ```bash
 docker pull rohanbatra/second_brain_database:latest
@@ -62,6 +93,10 @@ Let’s build smarter, more adaptable systems for managing our thoughts and data
 ---
 
 ### Technologies Used
-- **MongoDB**: For centralized, platform-agnostic data storage.
-- **Flask**: For building the API layer to interact with the database.
-- **Micro Frontends**: Modular frontends for specific tasks and ease of use.
+- **FastAPI**: Modern, high-performance Python web framework for building APIs
+- **MongoDB**: For centralized, platform-agnostic data storage
+- **Redis**: For caching, session management, and Celery message broker
+- **Qdrant**: Vector database for RAG (Retrieval-Augmented Generation) capabilities
+- **Celery**: Distributed task queue for async processing
+- **Docker**: Containerization for easy deployment and development
+- **Micro Frontends**: Modular frontends for specific tasks and ease of use

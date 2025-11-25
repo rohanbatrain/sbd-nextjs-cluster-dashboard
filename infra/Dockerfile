@@ -18,12 +18,20 @@ ENV PATH="/root/.cargo/bin:$PATH"
 
 WORKDIR /app
 
-# Install dependencies
-COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --extra voice
+# Copy dependency files
+COPY config/pyproject.toml config/uv.lock ./
+
+# Install dependencies (including voice extras for production)
+RUN uv sync --frozen --no-dev
 
 # Runtime stage
 FROM python:3.11-slim as runtime
+
+# Add labels for better container management
+LABEL maintainer="Rohan Batra <contact@rohanbatra.in>"
+LABEL org.opencontainers.image.title="Second Brain Database"
+LABEL org.opencontainers.image.description="FastAPI-based knowledge management system"
+LABEL org.opencontainers.image.version="0.0.4"
 
 # Create non-root user
 RUN adduser --disabled-password --gecos '' sbduser
@@ -43,7 +51,10 @@ ENV PATH="/app/.venv/bin:$PATH"
 
 # Copy application code
 COPY src/ ./src/
-COPY .sbd ./
+COPY config/ ./config/
+
+# Copy configuration file if it exists (optional)
+COPY .sbd* ./
 
 # Set ownership
 RUN chown -R sbduser:sbduser /app
@@ -51,17 +62,24 @@ RUN chown -R sbduser:sbduser /app
 # Switch to non-root user
 USER sbduser
 
-# Expose port
+# Expose port (only for API mode)
 EXPOSE 8000
 
 # Environment variables
 ENV DEBUG=false \
     PYTHON_ENV=production \
-    LOG_LEVEL=info
+    LOG_LEVEL=info \
+    CMD_MODE=api
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+# Health check - uses Python instead of curl to avoid extra dependencies
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()" || exit 1
 
-# Start application
-CMD ["uvicorn", "src.second_brain_database.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4", "--proxy-headers", "--forwarded-allow-ips", "*"]
+# Entrypoint script to support multiple modes
+COPY --chown=sbduser:sbduser infra/entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
+ENTRYPOINT ["/app/entrypoint.sh"]
+
+# Default command (can be overridden)
+CMD ["api"]
