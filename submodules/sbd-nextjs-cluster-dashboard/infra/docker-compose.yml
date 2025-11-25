@@ -1,0 +1,300 @@
+version: '3.8'
+
+services:
+  # ============================================================================
+  # DATABASE SERVICES
+  # ============================================================================
+  
+  # MongoDB - Primary Database
+  mongo:
+    image: mongo:6.0
+    container_name: sbd-mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGODB_USERNAME:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGODB_PASSWORD:-changeme}
+      MONGO_INITDB_DATABASE: ${MONGODB_DATABASE:-second_brain_database}
+    volumes:
+      - mongo_data:/data/db
+      - mongo_config:/data/configdb
+    networks:
+      - sbd-network
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # Redis - Cache and Session Store
+  redis:
+    image: redis:7.0-alpine
+    container_name: sbd-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    networks:
+      - sbd-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # Qdrant - Vector Database for RAG
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: sbd-qdrant
+    restart: unless-stopped
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:-}
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - sbd-network
+    ports:
+      - "${QDRANT_PORT:-6333}:6333"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:6333/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # ============================================================================
+  # APPLICATION SERVICES
+  # ============================================================================
+
+  # FastAPI Application
+  api:
+    build:
+      context: ../
+      dockerfile: infra/Dockerfile
+      args:
+        BUILD_DATE: ${BUILD_DATE:-}
+        VCS_REF: ${VCS_REF:-}
+    image: second-brain-database:${IMAGE_TAG:-latest}
+    container_name: sbd-api
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    env_file:
+      - ../.env
+    environment:
+      # Database connections
+      - MONGODB_URL=mongodb://${MONGODB_USERNAME:-admin}:${MONGODB_PASSWORD:-changeme}@mongo:27017/${MONGODB_DATABASE:-second_brain_database}?authSource=admin
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      # Celery configuration
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      # Application mode
+      - CMD_MODE=api
+      - UVICORN_WORKERS=${UVICORN_WORKERS:-4}
+    ports:
+      - "${API_PORT:-8000}:8000"
+    networks:
+      - sbd-network
+    healthcheck:
+      test: python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # Celery Worker - Async Task Processing
+  celery-worker:
+    build:
+      context: ../
+      dockerfile: infra/Dockerfile
+    image: second-brain-database:${IMAGE_TAG:-latest}
+    container_name: sbd-celery-worker
+    restart: unless-stopped
+    command: ["celery-worker"]
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    env_file:
+      - ../.env
+    environment:
+      # Database connections
+      - MONGODB_URL=mongodb://${MONGODB_USERNAME:-admin}:${MONGODB_PASSWORD:-changeme}@mongo:27017/${MONGODB_DATABASE:-second_brain_database}?authSource=admin
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      # Celery configuration
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - CELERY_LOG_LEVEL=${CELERY_LOG_LEVEL:-info}
+      - CELERY_WORKER_CONCURRENCY=${CELERY_WORKER_CONCURRENCY:-4}
+      - CELERY_MAX_TASKS_PER_CHILD=${CELERY_MAX_TASKS_PER_CHILD:-1000}
+    networks:
+      - sbd-network
+    healthcheck:
+      test: celery -A src.second_brain_database.tasks.celery_app:celery_app inspect ping -d celery@$$HOSTNAME
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # Celery Beat - Periodic Task Scheduler
+  celery-beat:
+    build:
+      context: ../
+      dockerfile: infra/Dockerfile
+    image: second-brain-database:${IMAGE_TAG:-latest}
+    container_name: sbd-celery-beat
+    restart: unless-stopped
+    command: ["celery-beat"]
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - ../.env
+    environment:
+      # Database connections
+      - MONGODB_URL=mongodb://${MONGODB_USERNAME:-admin}:${MONGODB_PASSWORD:-changeme}@mongo:27017/${MONGODB_DATABASE:-second_brain_database}?authSource=admin
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      # Celery configuration
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - CELERY_LOG_LEVEL=${CELERY_LOG_LEVEL:-info}
+    networks:
+      - sbd-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+
+  # ============================================================================
+  # OPTIONAL SERVICES
+  # ============================================================================
+
+  # Ollama - Local LLM Inference (Optional)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: sbd-ollama
+    restart: unless-stopped
+    profiles: ["ollama", "full"]
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - sbd-network
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 8G
+        reservations:
+          cpus: '1.0'
+          memory: 2G
+
+  # Documentation (Optional)
+  docs:
+    build:
+      context: ../submodules/sbd-mkdocs
+      dockerfile: Dockerfile
+    image: sbd-docs:latest
+    container_name: sbd-docs
+    restart: unless-stopped
+    profiles: ["docs", "full"]
+    ports:
+      - "${DOCS_PORT:-8080}:80"
+    networks:
+      - sbd-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+
+# ============================================================================
+# VOLUMES
+# ============================================================================
+volumes:
+  mongo_data:
+    driver: local
+  mongo_config:
+    driver: local
+  redis_data:
+    driver: local
+  qdrant_data:
+    driver: local
+  ollama_data:
+    driver: local
+
+# ============================================================================
+# NETWORKS
+# ============================================================================
+networks:
+  sbd-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
