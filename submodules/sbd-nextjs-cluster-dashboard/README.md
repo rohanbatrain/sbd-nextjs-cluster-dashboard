@@ -1,165 +1,48 @@
-# SBD Cluster Dashboard - Production Deployment
+# sbd-nextjs-cluster-dashboard
 
-The cluster management dashboard for monitoring and managing your distributed SBD deployment.
+The **Cluster Dashboard** provides real-time monitoring and management for the Second Brain Database cluster. It visualizes node status, health metrics, and system performance.
 
-## 🚀 Quick Start
+## Features
 
-### Development
+-   **Cluster Overview**: View the status of all nodes in the cluster.
+-   **Real-time Metrics**: Monitor CPU, memory, and network usage.
+-   **Node Management**: detailed view of individual node performance.
+-   **Alerts**: Visual indicators for system issues.
 
-```bash
-# Install dependencies
-npm install
+## Tech Stack
 
-# Set environment variables
-cp .env.example .env.local
-# Edit .env.local with your backend URL
+-   **Framework**: [Next.js 16](https://nextjs.org/)
+-   **Language**: TypeScript
+-   **Styling**: [Tailwind CSS 4](https://tailwindcss.com/)
+-   **Data Fetching**: SWR
+-   **Visualization**: Recharts
+-   **Animations**: Framer Motion
 
-# Run development server
-npm run dev
-```
+## Prerequisites
 
-Visit `http://localhost:3000`
+-   Node.js 20+
+-   pnpm (recommended) or npm/yarn
 
-### Production Build
+## Getting Started
 
-```bash
-# Build for production
-npm run build
+1.  **Install dependencies**:
+    ```bash
+    pnpm install
+    ```
 
-# Start production server
-npm start
-```
+2.  **Run the development server**:
+    ```bash
+    pnpm dev
+    ```
+    Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-## ⚙️ Configuration
+## Scripts
 
-Create `.env.production`:
+-   `pnpm dev`: Run the development server.
+-   `pnpm build`: Build the application for production.
+-   `pnpm start`: Start the production server.
+-   `pnpm lint`: Run ESLint.
 
-```env
-NEXT_PUBLIC_API_BASE_URL=https://your-sbd-backend.com
-```
+## License
 
-## 🐳 Docker Deployment
-
-### Build Image
-
-```bash
-docker build -t sbd-cluster-dashboard .
-```
-
-### Run Container
-
-```bash
-docker run -p 3000:3000 \
-  -e NEXT_PUBLIC_API_BASE_URL=https://your-sbd-backend.com \
-  sbd-cluster-dashboard
-```
-
-## ☸️ Kubernetes Deployment
-
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: sbd-cluster-dashboard
-spec:
-  replicas: 2
-  selector:
-    matchLabels:
-      app: sbd-dashboard
-  template:
-    metadata:
-      labels:
-        app: sbd-dashboard
-    spec:
-      containers:
-      - name: dashboard
-        image: sbd-cluster-dashboard:latest
-        ports:
-        - containerPort: 3000
-        env:
-        - name: NEXT_PUBLIC_API_BASE_URL
-          value: "http://sbd-backend-service:8000"
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: sbd-dashboard-service
-spec:
-  selector:
-    app: sbd-dashboard
-  ports:
-  - port: 80
-    targetPort: 3000
-  type: LoadBalancer
-```
-
-## 📚 Features
-
-- **Real-time Monitoring**: Auto-refreshing cluster health metrics
-- **Node Management**: View, promote, demote nodes
-- **Alerts System**: Real-time alerts with resolve functionality
-- **Settings**: Configure cluster parameters
-- **Responsive Design**: Works on desktop, tablet, and mobile
-- **Dark Mode**: Easy on the eyes
-
-## 🔧 Tech Stack
-
-- **Framework**: Next.js 15
-- **Language**: TypeScript
-- **Styling**: Tailwind CSS
-- **Charts**: Recharts
-- **Icons**: Lucide React
-
-## 📖 Usage
-
-### Dashboard Overview
-- View cluster health summary
-- Monitor replication lag
-- Track pending events
-- See recent alerts
-
-### Nodes Page
-- List all cluster nodes
-- View node details and metrics
-- Promote/demote nodes
-- Remove nodes from cluster
-
-### Alerts Page
-- View active alerts sorted by severity
-- Resolve alerts
-- Filter by severity or node
-- View alert history
-
-### Settings
-- Configure alert thresholds
-- Update cluster parameters
-- View cluster configuration
-
-## 🔒 Security
-
-This dashboard is designed for **owner-only access**. In production:
-
-1. Deploy behind authentication (OAuth, JWT, etc.)
-2. Use HTTPS for all connections
-3. Restrict network access to authorized IPs
-4. Enable CORS only for trusted domains
-
-## 🐛 Troubleshooting
-
-**Dashboard shows "Failed to load"**:
-- Check `NEXT_PUBLIC_API_BASE_URL` is set correctly
-- Verify backend is running and accessible
-- Check browser console for CORS errors
-
-**Alerts not updating**:
-- Auto-refresh interval is 10 seconds
-- Check backend `/cluster/alerts/active` endpoint
-
-**Slow performance**:
-- Reduce refresh intervals in `src/lib/api.ts`
-- Enable caching in production build
-- Use CDN for static assets
-
-## 📄 License
-
-Same as main SBD project
+Private
