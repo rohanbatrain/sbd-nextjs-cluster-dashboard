@@ -1,0 +1,104 @@
+# .github/workflows/dev.yml
+name: Dev Pipeline (dev branch)
+
+on:
+  push:
+    branches: [ "dev" ]
+  pull_request:
+    branches: [ "dev" ]
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      docker_image: ${{ steps.set_image.outputs.img }}
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Setup Node & pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          node-version: 20
+
+      - name: Enable corepack & pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@latest --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm run lint
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      - name: Run Tests
+        run: pnpm test -- --maxWorkers=50%
+
+      - name: Build
+        run: pnpm build
+
+  docker:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (for Docker context)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Login to GHCR
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ secrets.GHCR_USERNAME }}
+          password: ${{ secrets.GHCR_TOKEN }}
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v2
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set tags
+        id: set_image
+        run: |
+          IMAGE_NAME_GHCR=ghcr.io/${{ github.repository_owner }}/sbd-nextjs-${{ github.event.repository.name }}
+          IMAGE_NAME_DH=${{ secrets.DOCKERHUB_USERNAME }}/sbd-nextjs-${{ github.event.repository.name }}
+          echo "IMAGE_GHCR=${IMAGE_NAME_GHCR}:dev" >> $GITHUB_OUTPUT
+          echo "IMAGE_DH=${IMAGE_NAME_DH}:dev" >> $GITHUB_OUTPUT
+
+      - name: Build and push (multi-arch)
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/sbd-nextjs-${{ github.event.repository.name }}:dev
+            ${{ secrets.DOCKERHUB_USERNAME }}/sbd-nextjs-${{ github.event.repository.name }}:dev
+          build-args: |
+            NODE_ENV=production
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: next-standalone
+          path: .next/standalone
