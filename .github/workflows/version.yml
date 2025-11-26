@@ -50,7 +50,7 @@ jobs:
         run: pnpm run type-check
 
       - name: Run Tests
-        run: pnpm exec jest --passWithNoTests
+        run: pnpm test --maxWorkers=50% --passWithNoTestst --passWithNoTests
 
       - name: Build
         run: pnpm build
