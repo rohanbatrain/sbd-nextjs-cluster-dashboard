@@ -1,59 +1,42 @@
-FROM node:18-alpine AS base
+# --- Dockerfile (use Next.js standalone output + bun runtime)
 
-# Install dependencies only when needed
-FROM base AS deps
-RUN apk add --no-cache libc6-compat
+# 1. Builder (node + pnpm)
+FROM node:20-alpine AS builder
+ENV NODE_ENV=production
 WORKDIR /app
 
-# Install dependencies based on the preferred package manager
-COPY package.json yarn.lock* package-lock.json* pnpm-lock.yaml* ./
-RUN \
-  if [ -f yarn.lock ]; then yarn --frozen-lockfile; \
-  elif [ -f package-lock.json ]; then npm ci; \
-  elif [ -f pnpm-lock.yaml ]; then corepack enable pnpm && pnpm i --frozen-lockfile; \
-  else echo "Lockfile not found." && exit 1; \
-  fi
+# install pnpm
+RUN corepack enable && corepack prepare pnpm@latest --activate
 
-# Rebuild the source code only when needed
-FROM base AS builder
-WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
+# Copy package manifests only to leverage cache
+COPY package.json pnpm-lock.yaml* ./
+# If monorepo/workspace: COPY pnpm-workspace.yaml .
+RUN pnpm fetch --production
+
+# Copy everything
 COPY . .
 
-ENV NEXT_TELEMETRY_DISABLED 1
+# Ensure submodules are present in CI (they should be checked out by actions).
+# Install and build
+RUN pnpm install --frozen-lockfile
+# Build step. Assume script "build" exists in package.json that emits standalone output.
+RUN pnpm build
 
-RUN \
-  if [ -f yarn.lock ]; then yarn run build; \
-  elif [ -f package-lock.json ]; then npm run build; \
-  elif [ -f pnpm-lock.yaml ]; then corepack enable pnpm && pnpm run build; \
-  else echo "Lockfile not found." && exit 1; \
-  fi
+# 2. Create tar of standalone for artifact
+FROM builder AS pack
+RUN mkdir -p /out && cp -R .next/standalone /out/standalone && cp -R public /out/public
 
-# Production image, copy all the files and run next
-FROM base AS runner
+# 3. Runtime with bun
+FROM oven/bun:edge AS runner
+ENV NODE_ENV=production
 WORKDIR /app
 
-ENV NODE_ENV production
-ENV NEXT_TELEMETRY_DISABLED 1
+# Copy standalone
+COPY --from=pack /out/standalone ./
+COPY --from=pack /out/public ./public
 
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 nextjs
-
-COPY --from=builder /app/public ./public
-
-# Set the correct permission for prerender cache
-RUN mkdir .next
-RUN chown nextjs:nodejs .next
-
-# Automatically leverage output traces to reduce image size
-COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-
-USER nextjs
-
+# If you have environment files, copy them in build step via build args (do not bake secrets)
 EXPOSE 3000
 
-ENV PORT 3000
-ENV HOSTNAME "0.0.0.0"
-
+# The standalone/server.js path may vary. Adjust if your standalone output produces different entry script.
 CMD ["node", "server.js"]
