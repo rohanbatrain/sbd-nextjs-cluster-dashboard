@@ -1,10 +1,10 @@
-# .github/workflows/main.yml
-name: Production Pipeline (main)
+name: Prod Pipeline (main branch)
 
 on:
   push:
-    branches:
-      - main
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
 
 permissions:
   contents: read
@@ -12,14 +12,16 @@ permissions:
   id-token: write
 
 concurrency:
-  group: "prod-${{ github.ref }}"
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  verify-and-build:
+  prepare:
     runs-on: ubuntu-latest
+    outputs:
+      docker_image: ${{ steps.set_image.outputs.img }}
     steps:
-      - name: Checkout with submodules
+      - name: Checkout (with submodules)
         uses: actions/checkout@v4
         with:
           submodules: recursive
@@ -41,7 +43,7 @@ jobs:
           corepack enable
           corepack prepare pnpm@latest --activate
 
-      - name: Install deps
+      - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Lint
@@ -50,48 +52,58 @@ jobs:
       - name: Typecheck
         run: pnpm run typecheck
 
-      - name: Run tests
-        run: pnpm test
+      - name: Run Tests
+        run: pnpm test -- --maxWorkers=50%
 
       - name: Build
         run: pnpm build
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: next-standalone
-          path: .next/standalone
-
   docker:
-    needs: verify-and-build
+    needs: prepare
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout (for Docker context)
         uses: actions/checkout@v4
         with:
           submodules: recursive
           fetch-depth: 0
 
-      - name: Login GHCR
+      - name: Login to GHCR
         uses: docker/login-action@v2
         with:
           registry: ghcr.io
           username: ${{ secrets.GHCR_USERNAME }}
           password: ${{ secrets.GHCR_TOKEN }}
 
-      - name: Login DockerHub
+      - name: Login to DockerHub
         uses: docker/login-action@v2
         with:
           registry: docker.io
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build & push latest
+      - name: Set tags
+        id: set_image
+        run: |
+          IMAGE_NAME_GHCR=ghcr.io/${{ github.repository_owner }}/sbd-nextjs-${{ github.event.repository.name }}
+          IMAGE_NAME_DH=${{ secrets.DOCKERHUB_USERNAME }}/sbd-nextjs-${{ github.event.repository.name }}
+          echo "IMAGE_GHCR=${IMAGE_NAME_GHCR}:latest" >> $GITHUB_OUTPUT
+          echo "IMAGE_DH=${IMAGE_NAME_DH}:latest" >> $GITHUB_OUTPUT
+
+      - name: Build and push (multi-arch)
         uses: docker/build-push-action@v4
         with:
           context: .
           push: true
+          platforms: linux/amd64,linux/arm64
           tags: |
             ghcr.io/${{ github.repository_owner }}/sbd-nextjs-${{ github.event.repository.name }}:latest
             ${{ secrets.DOCKERHUB_USERNAME }}/sbd-nextjs-${{ github.event.repository.name }}:latest
-          platforms: linux/amd64,linux/arm64
+          build-args: |
+            NODE_ENV=production
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: next-standalone
+          path: .next/standalone
