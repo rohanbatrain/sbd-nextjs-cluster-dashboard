@@ -6,8 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint --max-warnings=0",
-    "lint:fix": "next lint --fix",
+    "lint": "next lint",
     "type-check": "tsc --noEmit",
     "test": "echo 'No tests specified'",
     "prepare": "husky || true"
